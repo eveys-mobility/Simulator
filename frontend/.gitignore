@@ -1,0 +1,22 @@
+# Frontend specific ignores
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Vite
+.vite/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+
+# Test
+playwright-report/
+test-results/
