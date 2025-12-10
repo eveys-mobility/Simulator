@@ -1,0 +1,5 @@
+# Keep this directory but ignore all JSON data files
+*.json
+
+# Keep the .gitkeep file
+!.gitkeep
