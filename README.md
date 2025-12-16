@@ -1,93 +1,433 @@
-# cps
+# ⚡ Eveys Charge Point Simulator
 
+A comprehensive OCPP 1.6J charge point simulator with a beautiful web-based control panel for testing and simulating various charging scenarios. Built by Eveys for EV charging innovation.
 
+![Eveys Logo](frontend/src/assets/eveys-white.svg)
 
-## Getting started
+## 🌟 Features
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Core OCPP Functionality
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **Full OCPP 1.6J Protocol Support** - Complete implementation of WebSocket-based OCPP communication
+- **22kW AC Charging Simulation** - Realistic power delivery and energy consumption simulation with configurable ramp-up
+- **Real-time Monitoring** - Live dashboard with power output, energy delivered, and session duration
+- **Comprehensive Logging** - All OCPP messages logged with timestamps and direction indicators
 
-## Add your files
+### Advanced Features
 
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+#### 🔐 ID Tag Authorization System
+
+- **Local Authorization List** - Persistent whitelist of authorized ID tags for offline operation
+- **Authorization Cache** - TTL-based caching of authorization responses with LRU eviction
+- **Smart Authorization Flow** - Hierarchical check: cache → local list → central system
+- **Concurrent Transaction Prevention** - Prevents same ID tag from starting multiple transactions
+- **Tag Expiry Validation** - Automatic rejection of expired ID tags
+- **Default Test Tags** - Pre-loaded with `TEST-TAG-001`, `ADMIN-TAG`, and `DEMO-TAG`
+
+#### ⚙️ Configuration Management
+
+- **90+ OCPP Configuration Keys** - Full support for standard and vendor-specific keys
+- **Real-time Configuration** - Live updates to charging behavior
+- **Persistent Storage** - Configuration saved per charge point ID
+- **Web UI Management** - Search, filter, and edit configuration keys
+- **Categories** - Organized by Core, Security, Smart Charging, Local Auth List, and more
+
+#### 📊 Transaction Management
+
+- **Persistent Meter Values** - Meter readings survive simulator restarts
+- **Transaction History** - Track all charging sessions with detailed statistics
+- **Transaction Tracker** - Monitor active transactions across restarts
+- **Offline Data Buffer** - Queue messages when disconnected, send when reconnected
+- **Manual Consumption** - Manually add energy consumption for testing
+
+#### 🎭 Scenario Simulation
+
+Test various real-world scenarios:
+
+- Emergency stop button
+- Network offline/online transitions
+- User pause/resume from car
+- Connector unlock during charging
+- Over-temperature conditions
+- Ground fault detection
+- Power outage and recovery
+
+### UI/UX
+
+- **Beautiful Modern UI** - Dark theme with gradients, animations, and responsive design
+- **Eveys Branding** - Professional logo integration and consistent branding
+- **WebSocket Real-time Updates** - Instant updates to the control panel
+- **Configuration Panel** - Comprehensive UI for managing all OCPP settings
+- **Export Functionality** - Download logs and transaction history
+
+## 📋 Prerequisites
+
+- Node.js 18+ and npm
+- An OCPP 1.6J Central System (e.g., [SteVe](https://github.com/steve-community/steve), ChargeCloud, or any OCPP-compliant backend)
+
+## 🚀 Quick Start
+
+### 1. Clone and Install
+
+```bash
+# Navigate to project directory
+cd ocpp-chargepoint-simulator
+
+# Install backend dependencies
+cd backend
+npm install
+
+# Install frontend dependencies
+cd ../frontend
+npm install
+```
+
+### 2. Configure
+
+Edit `backend/.env` file:
+
+```env
+# OCPP Central System Configuration
+OCPP_SERVER_URL=ws://dev.toger.co:5080
+CHARGE_POINT_ID=AE0022G1GNAC00617X
+
+# Charge Point Configuration
+MAX_POWER_KW=22
+CONNECTOR_TYPE=Type2
+VOLTAGE=400
+MAX_CURRENT=32
+
+# API Server Configuration
+API_PORT=3001
+FRONTEND_URL=http://localhost:5173
+
+# Simulation Settings
+METER_VALUE_INTERVAL=60
+HEARTBEAT_INTERVAL=300
+```
+
+### 3. Run
+
+**Terminal 1 - Backend:**
+
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 2 - Frontend:**
+
+```bash
+cd frontend
+npm run dev
+```
+
+### 4. Access
+
+Open your browser to **<http://localhost:5173>**
+
+## 🎮 Usage
+
+### Connecting to OCPP Server
+
+1. The simulator automatically connects on startup
+2. BootNotification is sent with Eveys vendor information
+3. Heartbeat starts automatically
+4. Connection status updates in real-time
+
+### Starting a Charging Session
+
+1. Enter an ID Tag (default: `TEST-TAG-001`, `ADMIN-TAG`, or `DEMO-TAG`)
+2. Click **"Start Charging"**
+3. Authorization flow executes:
+   - Checks authorization cache
+   - Checks local authorization list
+   - Queries central system if needed
+4. Watch real-time power output, energy delivered, and session duration
+5. OCPP messages appear in the logs panel
+
+### Managing Authorization
+
+The simulator includes a built-in authorization system:
+
+- **Local Authorization List**: Whitelist of authorized tags (works offline)
+- **Authorization Cache**: Speeds up repeated authorizations
+- **Concurrent Transaction Check**: Prevents duplicate sessions
+- **Tag Expiry**: Automatic validation of expiration dates
+
+### Configuration Management
+
+Access the Configuration tab to:
+
+- View all 90+ OCPP configuration keys
+- Search and filter by category
+- Edit values in real-time
+- See detailed descriptions for each key
+- Changes take effect immediately
+
+### Controlling Charging
+
+- **Pause** - Temporarily suspend charging (simulates EV pause)
+- **Resume** - Continue charging after pause
+- **Stop** - End the charging session
+- **Manual Consumption** - Add energy manually for testing
+
+### Simulating Scenarios
+
+Use the Scenario Simulation panel to test various conditions:
+
+- **Emergency Stop** - Immediate fault and transaction stop
+- **Network Offline** - Disconnect from OCPP server
+- **Network Online** - Reconnect to OCPP server
+- **User Pause (EV)** - Simulate user pausing from car
+- **User Resume (EV)** - Simulate user resuming from car
+- **Connector Unlock** - Unlock connector during charging
+- **Over Temperature** - Temperature fault condition
+- **Ground Fault** - Ground failure detection
+- **Power Outage** - Simulate power loss
+- **Power Restored** - Simulate power recovery
+
+## 📊 OCPP Messages Supported
+
+### Charge Point Initiated
+
+- ✅ BootNotification (with Eveys vendor info)
+- ✅ Heartbeat
+- ✅ StatusNotification
+- ✅ StartTransaction
+- ✅ StopTransaction
+- ✅ MeterValues (with configurable measurands)
+- ✅ Authorize
+- ✅ DataTransfer
+
+### Central System Initiated
+
+- ✅ RemoteStartTransaction
+- ✅ RemoteStopTransaction
+- ✅ UnlockConnector
+- ✅ GetConfiguration
+- ✅ ChangeConfiguration
+- ✅ Reset
+- ✅ TriggerMessage
+- ✅ SendLocalList
+- ✅ GetLocalListVersion
+
+## 🏗️ Architecture
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/visiosoft/eveys/cps.git
-git branch -M main
-git push -uf origin main
+eveys-chargepoint-simulator/
+├── backend/                    # Node.js + TypeScript backend
+│   ├── src/
+│   │   ├── ocpp/              # OCPP protocol implementation
+│   │   │   ├── ChargePoint.ts           # WebSocket client
+│   │   │   ├── TransactionManager.ts    # Session management
+│   │   │   ├── ConfigurationManager.ts  # OCPP configuration
+│   │   │   ├── AuthorizationManager.ts  # ID tag authorization
+│   │   │   ├── LocalAuthList.ts         # Local whitelist
+│   │   │   ├── AuthorizationCache.ts    # Authorization caching
+│   │   │   ├── MeterValueStorage.ts     # Persistent meter values
+│   │   │   ├── TransactionTracker.ts    # Active transaction tracking
+│   │   │   ├── TransactionHistory.ts    # Historical transactions
+│   │   │   └── OfflineDataBuffer.ts     # Offline message queue
+│   │   ├── simulation/        # Scenario engine
+│   │   ├── api/               # REST API and WebSocket
+│   │   └── models/            # Data models
+│   ├── data/                  # Persistent data storage
+│   └── package.json
+└── frontend/                   # React + TypeScript frontend
+    ├── src/
+    │   ├── components/        # UI components
+    │   │   ├── Dashboard.tsx
+    │   │   ├── ChargingControls.tsx
+    │   │   ├── LogsViewer.tsx
+    │   │   ├── ScenarioPanel.tsx
+    │   │   ├── ConfigurationPanel.tsx
+    │   │   └── ManualConsumption.tsx
+    │   ├── services/          # API client
+    │   └── assets/            # Eveys branding assets
+    └── package.json
 ```
 
-## Integrate with your tools
+## 🔧 API Endpoints
 
-* [Set up project integrations](https://gitlab.com/visiosoft/eveys/cps/-/settings/integrations)
+### Core Operations
 
-## Collaborate with your team
+- `GET /api/status` - Get current charge point status
+- `POST /api/connect` - Connect to OCPP server
+- `POST /api/disconnect` - Disconnect from server
+- `POST /api/heartbeat` - Send manual heartbeat
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### Charging Control
 
-## Test and Deploy
+- `POST /api/start-charging` - Start charging session
+- `POST /api/stop-charging` - Stop charging session
+- `POST /api/pause-charging` - Pause charging
+- `POST /api/resume-charging` - Resume charging
+- `POST /api/manual-consumption` - Add manual energy consumption
 
-Use the built-in continuous integration in GitLab.
+### Configuration
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- `GET /api/config` - Get OCPP configuration
+- `POST /api/config` - Update configuration key
 
-***
+### Authorization (Planned)
 
-# Editing this README
+- `GET /api/auth/local-list` - Get local authorization list
+- `POST /api/auth/local-list` - Add ID tag to local list
+- `DELETE /api/auth/local-list/:idTag` - Remove ID tag
+- `POST /api/auth/clear-cache` - Clear authorization cache
+- `GET /api/auth/cache` - View cache contents
+- `GET /api/auth/stats` - Get authorization statistics
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Scenarios
 
-## Suggestions for a good README
+- `POST /api/simulate-scenario` - Execute scenario
+- `GET /api/scenarios` - Get available scenarios
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### Transaction History
 
-## Name
-Choose a self-explaining name for your project.
+- `GET /api/transactions/history` - Get transaction history
+- `GET /api/transactions/stats` - Get transaction statistics
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Data Transfer
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+- `POST /api/data-transfer` - Send custom data transfer message
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## 🌐 WebSocket Events
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Connect to `ws://localhost:3001/ws` for real-time updates:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+- `status` - Charge point status updates
+- `session` - Charging session updates
+- `log` - OCPP message logs
+- `event` - System events (connected, disconnected, transactionStarted, etc.)
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## 📝 Configuration Keys
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+The simulator supports 90+ OCPP configuration keys organized by category:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Core Configuration
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+- `HeartbeatInterval` - Heartbeat frequency (seconds)
+- `MeterValueSampleInterval` - Meter value reporting interval
+- `MeterValuesSampledData` - Measurands to include (Energy.Active.Import.Register, Power.Active.Import, Current.Import, Voltage, SoC, Temperature)
+- `StopTransactionOnEVSideDisconnect` - Auto-stop on disconnect
+- `ConnectionTimeOut` - WebSocket connection timeout
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Authorization
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- `LocalAuthListEnabled` - Enable local authorization list
+- `LocalAuthListMaxLength` - Maximum entries in local list
+- `AuthorizationCacheEnabled` - Enable authorization caching
+- `AllowOfflineTxForUnknownId` - Allow unknown tags when offline
 
-## License
-For open source projects, say how it is licensed.
+### Transaction Management
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- `TransactionMessageAttempts` - Retry attempts for transaction messages
+- `TransactionMessageRetryInterval` - Retry interval in seconds
+- `StopTxnAlignedData` - Measurands for stop transaction
+- `StopTxnSampledData` - Sampled data for stop transaction
+
+### Smart Charging
+
+- `ChargeProfileMaxStackLevel` - Maximum stack level
+- `ChargingScheduleAllowedChargingRateUnit` - Allowed rate units
+- `MaxChargingProfilesInstalled` - Maximum profiles
+
+And many more... See Configuration Panel for full list.
+
+## 🎨 UI Features
+
+- **Modern Dark Theme** - Beautiful gradient backgrounds with Eveys branding
+- **Real-time Metrics** - Live power, energy, and duration displays
+- **Progress Indicators** - Visual power output progress bar
+- **Message Logs** - Color-coded incoming/outgoing messages with export
+- **Configuration Management** - Search, filter, and edit 90+ config keys
+- **Transaction History** - View past charging sessions
+- **Responsive Design** - Works on desktop and tablet
+
+## 🧪 Testing with SteVe
+
+To test with [SteVe](https://github.com/steve-community/steve):
+
+1. Install and run SteVe (default: <http://localhost:8180>)
+2. Add charge point with your CHARGE_POINT_ID
+3. Set OCPP_SERVER_URL to `ws://localhost:8180/steve/websocket/CentralSystemService/{CHARGE_POINT_ID}`
+4. Simulator connects automatically
+5. Use SteVe web interface to:
+   - Send RemoteStartTransaction
+   - Change configuration
+   - Update local authorization list
+   - Monitor transactions
+
+## 🛠️ Development
+
+### Backend Development
+
+```bash
+cd backend
+npm run dev    # Run with hot reload
+npm run build  # Build for production
+npm start      # Run production build
+```
+
+### Frontend Development
+
+```bash
+cd frontend
+npm run dev    # Run development server
+npm run build  # Build for production
+```
+
+## 📦 Production Build
+
+```bash
+# Build backend
+cd backend
+npm run build
+
+# Build frontend
+cd frontend
+npm run build
+
+# Run production
+cd backend
+npm start
+```
+
+## 🔒 Security Features
+
+- **ID Tag Authorization** - Multi-level authorization with cache and local list
+- **Concurrent Transaction Prevention** - One transaction per ID tag
+- **Tag Expiry Validation** - Automatic expiration checking
+- **Offline Operation** - Local authorization list works without central system
+- **Secure Configuration** - Protected configuration keys
+
+## 📈 Performance Features
+
+- **Authorization Caching** - Reduces central system load
+- **Persistent Storage** - Meter values and transactions survive restarts
+- **Offline Buffer** - Queues messages when disconnected
+- **Configurable Intervals** - Optimize network usage
+- **LRU Cache Eviction** - Efficient memory management
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## 📄 License
+
+MIT License
+
+## 🙏 Acknowledgments
+
+- OCPP 1.6J Specification by Open Charge Alliance
+- React and Vite for the amazing developer experience
+- Lucide React for beautiful icons
+- TypeScript for type safety
+
+---
+
+**Made with ⚡ by Eveys for EV charging innovation**
+
+*Eveys - Powering the future of electric mobility*
