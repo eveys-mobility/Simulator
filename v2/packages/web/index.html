@@ -4,6 +4,20 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>OCPP Simulator</title>
+        <script>
+            // Apply theme synchronously before React mounts to avoid FOUC.
+            // The bundle's `useApplyTheme` keeps this in sync afterwards.
+            (() => {
+                try {
+                    const saved = localStorage.getItem('ocpp-sim-theme');
+                    const mode = saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
+                    const dark =
+                        mode === 'dark' ||
+                        (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                    if (dark) document.documentElement.classList.add('dark');
+                } catch {}
+            })();
+        </script>
     </head>
     <body class="bg-background text-foreground">
         <div id="root"></div>

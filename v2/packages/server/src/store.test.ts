@@ -96,6 +96,29 @@ describe('Store — devices', () => {
     });
 });
 
+describe('Store — app settings', () => {
+    it('returns null for an unset key', () => {
+        const s = new Store(':memory:');
+        expect(s.getSetting('default_ocpp_url')).toBeNull();
+        s.close();
+    });
+
+    it('roundtrips a setting', () => {
+        const s = new Store(':memory:');
+        s.setSetting('default_ocpp_url', 'ws://gateway.example:19000');
+        expect(s.getSetting('default_ocpp_url')).toBe('ws://gateway.example:19000');
+        s.close();
+    });
+
+    it('upserts on conflict', () => {
+        const s = new Store(':memory:');
+        s.setSetting('default_ocpp_url', 'ws://a:1');
+        s.setSetting('default_ocpp_url', 'ws://b:2');
+        expect(s.getSetting('default_ocpp_url')).toBe('ws://b:2');
+        s.close();
+    });
+});
+
 describe('Store — sessions', () => {
     it('insert + end + list', () => {
         const s = new Store(':memory:');

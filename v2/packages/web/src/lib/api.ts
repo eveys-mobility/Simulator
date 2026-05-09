@@ -45,6 +45,31 @@ export const api = {
         http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
     stopSession: (deviceId: string, connectorId: number, reason = 'Local') =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/sessions/stop`, { connectorId, reason }),
+    plugIn: (deviceId: string, connectorId: number) =>
+        http<{ ok: true }>('POST', `/devices/${deviceId}/actions/plug-in`, { connectorId }),
+    plugOut: (deviceId: string, connectorId: number) =>
+        http<{ ok: true }>('POST', `/devices/${deviceId}/actions/plug-out`, { connectorId }),
+    swipe: (deviceId: string, connectorId: number, idTag: string) =>
+        http<{ ok: true; outcome: 'started' | 'stopped' | 'rejected' }>(
+            'POST',
+            `/devices/${deviceId}/actions/swipe`,
+            { connectorId, idTag },
+        ),
+    injectFault: (
+        deviceId: string,
+        body: { connectorId: number; errorCode?: string; clearAfterSeconds?: number },
+    ) => http<{ ok: true }>('POST', `/devices/${deviceId}/actions/fault`, body),
+    clearFault: (deviceId: string, connectorId: number) =>
+        http<{ ok: true }>('POST', `/devices/${deviceId}/actions/clear-fault`, { connectorId }),
+    emergencyStop: (deviceId: string) =>
+        http<{ ok: true }>('POST', `/devices/${deviceId}/actions/emergency-stop`),
+    reboot: (deviceId: string, type: 'Soft' | 'Hard') =>
+        http<{ ok: true }>('POST', `/devices/${deviceId}/actions/reboot`, { type }),
+
+    getSettings: () => http<{ defaultOcppUrl: string }>('GET', '/settings'),
+    updateSettings: (body: { defaultOcppUrl: string }) =>
+        http<{ defaultOcppUrl: string }>('PUT', '/settings', body),
+
     listSessions: (q: { status?: 'active' | 'completed' | 'aborted'; deviceId?: string; limit?: number } = {}) => {
         const params = new URLSearchParams();
         if (q.status) params.set('status', q.status);

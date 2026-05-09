@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -57,53 +57,54 @@ export function DevicesPage() {
                         // Live online flag overrides the cached value when present.
                         const online = onlineMap.get(d.id) ?? d.online;
                         return (
-                            <Card key={d.id}>
-                                <CardHeader className="flex-row items-start justify-between space-y-0">
-                                    <div className="space-y-1">
-                                        <div className="flex items-center gap-2">
-                                            <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>{d.type}</Badge>
-                                            <CardTitle className="text-base">{d.displayName}</CardTitle>
+                            <Link
+                                key={d.id}
+                                to={`/devices/${d.id}`}
+                                className="group block rounded-lg ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            >
+                                <Card className="h-full transition-colors hover:border-brand-orange/40 hover:bg-card/80">
+                                    <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+                                        <div className="space-y-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>{d.type}</Badge>
+                                                <CardTitle className="text-base truncate">{d.displayName}</CardTitle>
+                                            </div>
+                                            <p className="font-mono text-xs text-muted-foreground truncate">{d.id}</p>
                                         </div>
-                                        <p className="font-mono text-xs text-muted-foreground">{d.id}</p>
-                                    </div>
-                                    <Badge variant={online ? 'online' : 'offline'}>{online ? 'Online' : 'Offline'}</Badge>
-                                </CardHeader>
-                                <CardContent className="space-y-3">
-                                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                                        <div>
-                                            <div className="text-[10px] uppercase tracking-wide">Model</div>
-                                            <div className="text-foreground">{d.model}</div>
+                                        <Badge variant={online ? 'online' : 'offline'}>
+                                            {online ? 'Online' : 'Offline'}
+                                        </Badge>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3 pt-0">
+                                        <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                                            <Cell label="Model" value={d.model} />
+                                            <Cell label="Connectors" value={String(d.connectors.length)} />
+                                            <Cell label="Max power" value={`${d.maxPowerKw} kW`} />
+                                            <Cell label="Phase" value={d.phaseMode} />
                                         </div>
-                                        <div>
-                                            <div className="text-[10px] uppercase tracking-wide">Connectors</div>
-                                            <div className="text-foreground">{d.connectors.length}</div>
+                                        <div className="flex items-center justify-between border-t border-border/60 pt-3">
+                                            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors group-hover:text-brand-orange">
+                                                Open device
+                                                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                                            </span>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="text-muted-foreground hover:text-destructive"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    if (confirm(`Delete ${d.displayName}?`)) remove.mutate(d.id);
+                                                }}
+                                                disabled={remove.isPending}
+                                                aria-label={`Delete ${d.displayName}`}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
                                         </div>
-                                        <div>
-                                            <div className="text-[10px] uppercase tracking-wide">Max power</div>
-                                            <div className="text-foreground">{d.maxPowerKw} kW</div>
-                                        </div>
-                                        <div>
-                                            <div className="text-[10px] uppercase tracking-wide">Phase mode</div>
-                                            <div className="text-foreground">{d.phaseMode}</div>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2 pt-2">
-                                        <Link to={`/devices/${d.id}`} className="flex-1">
-                                            <Button variant="secondary" className="w-full">Open</Button>
-                                        </Link>
-                                        <Button
-                                            variant="outline"
-                                            size="icon"
-                                            onClick={() => {
-                                                if (confirm(`Delete ${d.displayName}?`)) remove.mutate(d.id);
-                                            }}
-                                            disabled={remove.isPending}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </CardContent>
-                            </Card>
+                                    </CardContent>
+                                </Card>
+                            </Link>
                         );
                     })}
                 </div>
@@ -149,5 +150,14 @@ function NewDeviceForm({ onSubmit, pending }: { onSubmit: (body: { type: DeviceT
                 </form>
             </CardContent>
         </Card>
+    );
+}
+
+function Cell({ label, value }: { label: string; value: string }) {
+    return (
+        <div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+            <div className="text-foreground truncate">{value}</div>
+        </div>
     );
 }

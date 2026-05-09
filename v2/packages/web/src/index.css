@@ -1,30 +1,116 @@
+@import '@fontsource-variable/inter/index.css';
+/*
+ * Clash Display from the foundry. The eveys.com site uses Clash for
+ * display type (sampled from /assets/index-814c4624.css).
+ */
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Eveys brand palette — derived from the official OG image at
+ * https://eveys.com/image/og-image.png by ranking pixel area, with
+ * the wordmark color confirmed against /image/icons/brand.svg
+ * (#1A282F).
+ *
+ *   orange #F04E1F   65.4% of OG creative — primary brand voice
+ *   cloud  #F4F4F4   25.2% — light surfaces / dashboard panels
+ *   slate  #1A282F   2.2% — logo + text on light
+ *   green  #22C55E   charging-active state
+ *   blue   #1080F0   chart/data accent (low-frequency)
+ *   red    #F02050   destructive accent (low-frequency)
+ *
+ * Stored as HSL components (no `hsl(...)` wrapper) so Tailwind's
+ * `bg-primary/40` alpha-modifier syntax works.
+ */
 @layer base {
     :root {
-        --background: 222 47% 11%;
-        --foreground: 213 31% 91%;
-        --card: 222 47% 14%;
-        --card-foreground: 213 31% 91%;
-        --primary: 217 91% 60%;
-        --primary-foreground: 222 47% 11%;
-        --secondary: 217 33% 18%;
-        --secondary-foreground: 213 31% 91%;
-        --muted: 217 33% 18%;
-        --muted-foreground: 215 20% 65%;
-        --accent: 217 33% 18%;
-        --accent-foreground: 213 31% 91%;
-        --destructive: 0 63% 50%;
-        --destructive-foreground: 213 31% 91%;
-        --border: 217 33% 22%;
-        --input: 217 33% 22%;
-        --ring: 217 91% 60%;
-        --radius: 0.5rem;
+        /* Light theme — for completeness; the operator UI defaults to dark. */
+        --background: 0 0% 100%;
+        --foreground: 204 30% 14%;
+        --card: 0 0% 96%;
+        --card-foreground: 204 30% 14%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 204 30% 14%;
+        --primary: 13 88% 53%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 0 0% 96%;
+        --secondary-foreground: 204 30% 14%;
+        --muted: 0 0% 94%;
+        --muted-foreground: 204 15% 35%;
+        --accent: 142 71% 45%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 348 88% 53%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 90%;
+        --input: 0 0% 90%;
+        --ring: 13 88% 53%;
+        --radius: 0.625rem;
+
+        --brand-orange: 13 88% 53%;
+        --brand-slate: 204 30% 14%;
+        --brand-cloud: 0 0% 96%;
+        --brand-green: 142 71% 45%;
+        --brand-blue: 211 88% 50%;
+        --brand-red: 348 88% 53%;
     }
+
+    /*
+     * Dark theme — applied when `html.dark` is set (Tailwind class
+     * strategy). The mode picker writes that class based on the user
+     * choice (or `prefers-color-scheme` for system).
+     *
+     * Sits on the brand slate, orange as primary accent so the brand
+     * voice still carries. Charging-green for active states matches
+     * the OG image's "3.05 kwt" pill.
+     */
+    .dark {
+        --background: 204 30% 9%;
+        --foreground: 0 0% 96%;
+        --card: 204 30% 14%;
+        --card-foreground: 0 0% 96%;
+        --popover: 204 30% 16%;              /* slightly lifted from card so dropdowns read clearly */
+        --popover-foreground: 0 0% 96%;
+        --primary: 13 88% 58%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 204 25% 19%;
+        --secondary-foreground: 0 0% 96%;
+        --muted: 204 22% 17%;
+        --muted-foreground: 204 12% 65%;
+        --accent: 142 71% 50%;
+        --accent-foreground: 204 30% 9%;
+        --destructive: 348 88% 58%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 204 22% 14%;               /* hairline against the slate card */
+        --input: 204 22% 16%;
+        --ring: 13 88% 58%;
+    }
+
+    /*
+     * Default the `border` utility to the theme border, not currentColor.
+     * Without this, a `<div className="border">` picks up the foreground
+     * (near-white in dark mode), producing the "white borders everywhere"
+     * problem. shadcn ships this rule as part of its base reset.
+     */
+    * {
+        border-color: hsl(var(--border));
+    }
+
     body {
         @apply bg-background text-foreground antialiased;
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+        font-feature-settings: 'cv11', 'ss01', 'ss03';
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Clash Display', 'Inter Variable', system-ui, sans-serif;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+
+    .tabular-nums {
+        font-variant-numeric: tabular-nums;
     }
 }

@@ -24,6 +24,13 @@ interface ConnectorState {
      *  status. Modeled as a flag, not a status — so a faulted connector
      *  is also unavailable. */
     operative: boolean;
+    /** Whether a cable is currently plugged into the connector. The
+     *  default is unplugged (Available). plug-in moves to Preparing;
+     *  start_charging without plug-in implicitly plugs first. */
+    pluggedIn: boolean;
+    /** Pending fault auto-clear timer (set when a fault was injected
+     *  with `clear_after_seconds`). Cleared on manual clear or shutdown. */
+    faultClearTimer: NodeJS.Timeout | null;
 }
 
 /**
@@ -63,6 +70,8 @@ export class Simulator extends EventEmitter {
                 startedAtMs: 0,
                 tickTimer: null,
                 operative: true,
+                pluggedIn: false,
+                faultClearTimer: null,
             });
         }
         this.config = new OcppConfig(store, device.id, numConnectors);
@@ -98,6 +107,7 @@ export class Simulator extends EventEmitter {
     stop(): void {
         for (const c of this.connectors.values()) {
             if (c.tickTimer) clearInterval(c.tickTimer);
+            if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
         }
         this.client.stop();
     }
@@ -164,6 +174,178 @@ export class Simulator extends EventEmitter {
         await this.setStatus(connectorId, 'Available');
         this.emit('session', { type: 'stopped', connectorId, transactionId: tx, sessionRowId, energyWh, peakPowerKw, reason });
         return { sessionRowId, energyWh, peakPowerKw };
+    }
+
+    // ---- Manual / physical actions ----
+    //
+    // These model what a person does at a real charger: plug the cable
+    // in, swipe a card, hit the emergency-stop button. They drive the
+    // same OCPP semantics the CSMS-initiated equivalents do, but the
+    // intent is local-control, surfaced from the UI for testing.
+
+    /** Move connector Available → Preparing and report it to the gateway.
+     *  No-op if a session is already running on that connector. */
+    async plugIn(connectorId: number): Promise<void> {
+        const c = this.requireConnector(connectorId);
+        if (c.transactionId !== null) return;
+        if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
+        if (c.status === 'Faulted') throw new Error(`connector ${connectorId} is Faulted`);
+        if (c.pluggedIn) return;
+        c.pluggedIn = true;
+        await this.setStatus(connectorId, 'Preparing');
+    }
+
+    /** Pull the cable. Without an active session this returns the
+     *  connector to Available. With one, it ends the session with
+     *  reason=EVDisconnected (matches OCPP 1.6 §6.20). */
+    async plugOut(connectorId: number): Promise<void> {
+        const c = this.requireConnector(connectorId);
+        if (c.transactionId !== null) {
+            await this.stopSession(connectorId, 'EVDisconnected');
+            c.pluggedIn = false;
+            return;
+        }
+        c.pluggedIn = false;
+        if (c.status === 'Preparing') {
+            await this.setStatus(connectorId, 'Available');
+        }
+    }
+
+    /**
+     * RFID swipe: Authorize the tag with the gateway, and on Accepted
+     * either start (if no session) or stop (if same tag's session is
+     * running) — that's what real chargers do with a single button/tap.
+     * Returns the resulting `Authorize` idTagInfo status so the caller
+     * can react.
+     */
+    async swipeCard(connectorId: number, idTag: string): Promise<'started' | 'stopped' | 'rejected'> {
+        const c = this.requireConnector(connectorId);
+        if (!this.client.isOnline()) throw new Error('device offline');
+
+        const auth = (await this.client
+            .call('Authorize', { idTag })
+            .catch(() => ({ idTagInfo: { status: 'Invalid' } }))) as {
+            idTagInfo: { status: string };
+        };
+        if (auth.idTagInfo.status !== 'Accepted') return 'rejected';
+
+        if (c.transactionId !== null) {
+            // Same-tag swipe ends the session; different-tag is a no-op
+            // here (real chargers commonly require admin override). Keep
+            // it simple: any accepted swipe stops a running session.
+            await this.stopSession(connectorId, 'Local');
+            return 'stopped';
+        }
+
+        // Open a session, persisting the row first so RemoteStart and
+        // manual swipe share the same row-id flow.
+        if (!c.pluggedIn) await this.plugIn(connectorId);
+        const sessionRowId = this.store.insertSession({
+            deviceId: this.device.id,
+            connectorId,
+            transactionId: 0,
+            idTag,
+            status: 'active',
+            startedAt: new Date().toISOString(),
+            endedAt: null,
+            endReason: null,
+            energyWh: 0,
+            peakPowerKw: 0,
+        });
+        try {
+            const txId = await this.startSession(connectorId, idTag, sessionRowId);
+            this.store.db
+                .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                .run(txId, sessionRowId);
+            return 'started';
+        } catch (err) {
+            this.store.endSession({
+                id: sessionRowId,
+                endedAt: new Date().toISOString(),
+                endReason: 'aborted',
+                energyWh: 0,
+                peakPowerKw: 0,
+            });
+            throw err;
+        }
+    }
+
+    /**
+     * Inject a fault on a connector. Optional `clearAfterSeconds` schedules
+     * an auto-clear back to Available. If a session is active, it's stopped
+     * with reason=PowerLoss before the connector flips to Faulted.
+     */
+    async injectFault(args: {
+        connectorId: number;
+        errorCode?: string;
+        clearAfterSeconds?: number;
+    }): Promise<void> {
+        const { connectorId, errorCode = 'OtherError', clearAfterSeconds } = args;
+        const c = this.requireConnector(connectorId);
+        if (c.faultClearTimer) {
+            clearTimeout(c.faultClearTimer);
+            c.faultClearTimer = null;
+        }
+        if (c.transactionId !== null) {
+            await this.stopSession(connectorId, 'PowerLoss');
+        }
+        c.status = 'Faulted';
+        this.emit('state', { connectorId, status: 'Faulted' });
+        if (this.client.isOnline()) {
+            try {
+                await this.client.sendStatusNotification(connectorId, 'Faulted', errorCode);
+            } catch (err) {
+                this.emit('error', err);
+            }
+        }
+        if (typeof clearAfterSeconds === 'number' && clearAfterSeconds > 0) {
+            c.faultClearTimer = setTimeout(() => {
+                c.faultClearTimer = null;
+                this.clearFault(connectorId).catch((e) => this.emit('error', e));
+            }, clearAfterSeconds * 1000);
+        }
+    }
+
+    /** Clear a fault and return the connector to its natural idle state. */
+    async clearFault(connectorId: number): Promise<void> {
+        const c = this.requireConnector(connectorId);
+        if (c.faultClearTimer) {
+            clearTimeout(c.faultClearTimer);
+            c.faultClearTimer = null;
+        }
+        if (c.status !== 'Faulted') return;
+        const next = c.pluggedIn ? 'Preparing' : 'Available';
+        await this.setStatus(connectorId, next);
+    }
+
+    /**
+     * E-stop: hit the big red button. Aborts every running session
+     * with reason=EmergencyStop, flips every connector to Faulted with
+     * `EmergencyStop` error code. The CSMS sees the storm.
+     */
+    async emergencyStop(): Promise<void> {
+        for (const id of this.connectors.keys()) {
+            await this.injectFault({ connectorId: id, errorCode: 'OtherError' });
+            // OCPP doesn't have a dedicated EmergencyStop error code;
+            // the canonical signal is the StopTransaction reason — which
+            // the inner stopSession() emits. Faulted + OtherError covers
+            // the connector-side StatusNotification.
+        }
+    }
+
+    /**
+     * User-triggered reboot. Same surface as the CSMS Reset CALL: Soft
+     * reconnects the WS; Hard also aborts active sessions first.
+     */
+    async reboot(type: 'Soft' | 'Hard'): Promise<void> {
+        if (type === 'Hard') {
+            for (const [id, c] of this.connectors.entries()) {
+                if (c.transactionId !== null) {
+                    await this.stopSession(id, 'HardReset').catch(() => undefined);
+                }
+            }
+        }
+        this.client.disconnect();
     }
 
     private async handleOnline(): Promise<void> {
