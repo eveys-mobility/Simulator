@@ -33,6 +33,15 @@ interface PendingCall {
 
 const CALL_TIMEOUT_MS = 30_000;
 
+export interface OcppClientOptions {
+    /**
+     * Disable TLS certificate verification on `wss://` connections.
+     * Maps to `rejectUnauthorized: false` in the ws library.
+     * Use only for self-signed dev/staging CSMSes — never in production.
+     */
+    tlsInsecure?: boolean;
+}
+
 /**
  * Result of handling a CSMS-initiated CALL. The Simulator owns
  * the actual semantics; OcppClient just turns this into a frame.
@@ -54,12 +63,17 @@ export class OcppClient extends EventEmitter {
     private connected = false;
     private heartbeat: NodeJS.Timeout | null = null;
     private reconnect: NodeJS.Timeout | null = null;
+    private bootRetry: NodeJS.Timeout | null = null;
+    private bootDeferred = false;
     private heartbeatIntervalSec = 300;
     private reconnectAttempt = 0;
     private stopped = false;
     private incomingHandler: IncomingCallHandler | null = null;
 
-    constructor(private readonly device: Device) {
+    constructor(
+        private readonly device: Device,
+        private readonly options: OcppClientOptions = {},
+    ) {
         super();
     }
 
@@ -102,6 +116,7 @@ export class OcppClient extends EventEmitter {
     stop(): void {
         this.stopped = true;
         if (this.reconnect) clearTimeout(this.reconnect);
+        if (this.bootRetry) clearTimeout(this.bootRetry);
         if (this.heartbeat) clearInterval(this.heartbeat);
         for (const p of this.pending.values()) {
             clearTimeout(p.timeout);
@@ -151,7 +166,22 @@ export class OcppClient extends EventEmitter {
     private async openSocket(): Promise<void> {
         if (this.stopped) return;
         const url = `${this.device.ocppUrl}/${this.device.id}`;
-        const ws = new WebSocket(url, ['ocpp1.6']);
+        const headers: Record<string, string> = {};
+        if (this.device.authPassword) {
+            // OCPP 1.6 §17.4: charge-point identifier is the username,
+            // pre-shared password is the password. URL path already
+            // carries the identifier, but the server still validates
+            // it against the Authorization header.
+            const creds = Buffer.from(`${this.device.id}:${this.device.authPassword}`).toString('base64');
+            headers.Authorization = `Basic ${creds}`;
+        }
+        const isWss = url.startsWith('wss://');
+        const ws = new WebSocket(url, ['ocpp1.6'], {
+            headers,
+            // Only meaningful for wss:// — `ws` ignores TLS opts on plain ws.
+            rejectUnauthorized: isWss ? !this.options.tlsInsecure : undefined,
+            handshakeTimeout: 15_000,
+        });
         this.ws = ws;
 
         ws.on('open', async () => {
@@ -160,7 +190,10 @@ export class OcppClient extends EventEmitter {
             this.emit('online');
             try {
                 await this.sendBoot();
-                this.startHeartbeat();
+                // §4.2: only start the heartbeat loop once the CSMS has
+                // accepted us. While bootDeferred is true, sendBoot has
+                // already scheduled a retry on its own timer.
+                if (!this.bootDeferred) this.startHeartbeat();
             } catch (err) {
                 this.emit('error', err);
             }
@@ -185,7 +218,14 @@ export class OcppClient extends EventEmitter {
         if (this.stopped || this.reconnect) return;
         this.reconnectAttempt++;
         ocppWsReconnectsTotal.inc();
-        const backoff = Math.min(30_000, 1000 * 2 ** Math.min(this.reconnectAttempt, 5));
+        // Exponential backoff with full jitter (AWS architecture blog
+        // "Exponential Backoff And Jitter"). Without jitter, every device
+        // that lost the gateway in the same tick reconnects in lockstep
+        // and produces a thundering herd; the CSMS sees N simultaneous
+        // BootNotifications. Random spread inside the window smooths it
+        // out without changing the worst-case delay.
+        const ceiling = Math.min(30_000, 1000 * 2 ** Math.min(this.reconnectAttempt, 5));
+        const backoff = Math.floor(Math.random() * ceiling);
         this.reconnect = setTimeout(() => {
             this.reconnect = null;
             void this.openSocket();
@@ -275,10 +315,41 @@ export class OcppClient extends EventEmitter {
             BootNotificationResSchema,
         );
         if (res.status !== 'Accepted') {
-            throw new Error(`BootNotification rejected: ${res.status}`);
+            // OCPP 1.6 §4.2: on Rejected/Pending, the charge point must
+            // not send any other messages and must retry BootNotification
+            // after `interval` seconds. We honor that by *not* starting
+            // heartbeats or letting the Simulator emit anything until the
+            // next boot succeeds. The retry runs on a one-shot timer so
+            // it doesn't need to share the heartbeat interval timer.
+            this.bootDeferred = true;
+            const retrySec = res.interval > 0 ? res.interval : 60;
+            this.emit('boot-deferred', { status: res.status, retrySec });
+            this.scheduleBootRetry(retrySec);
+            return;
         }
+        this.bootDeferred = false;
         this.heartbeatIntervalSec = res.interval > 0 ? res.interval : 300;
         this.emit('booted', res);
+    }
+
+    private scheduleBootRetry(seconds: number): void {
+        if (this.bootRetry) clearTimeout(this.bootRetry);
+        this.bootRetry = setTimeout(() => {
+            this.bootRetry = null;
+            if (this.stopped || !this.connected) return;
+            this.sendBoot()
+                .then(() => {
+                    if (!this.bootDeferred) this.startHeartbeat();
+                })
+                .catch((err) => this.emit('error', err));
+        }, seconds * 1000);
+    }
+
+    /** True until the CSMS Accepts a BootNotification. While deferred,
+     *  the Simulator must not issue StatusNotification, MeterValues,
+     *  StartTransaction, etc. — only Heartbeat is allowed by §4.2. */
+    isBootDeferred(): boolean {
+        return this.bootDeferred;
     }
 
     private startHeartbeat(): void {

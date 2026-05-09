@@ -20,6 +20,12 @@ interface FormState {
     firmwareVersion: string;
     maxPowerKw: string;
     ocppUrl: string;
+    authPasswordDraft: string;
+    /** True when the user typed something into the password field — only
+     *  then do we send it. Distinguishes "leave alone" from "clear". */
+    authPasswordDirty: boolean;
+    /** True when the user explicitly clicked Clear, sending empty string. */
+    authPasswordCleared: boolean;
     phaseMode: PhaseMode;
     // AC wiring (only meaningful when device.type === 'AC')
     acPhases: '1' | '3';
@@ -44,6 +50,9 @@ function formFromDevice(d: DeviceWithRuntime): FormState {
         firmwareVersion: d.firmwareVersion,
         maxPowerKw: String(d.maxPowerKw),
         ocppUrl: d.ocppUrl,
+        authPasswordDraft: '',
+        authPasswordDirty: false,
+        authPasswordCleared: false,
         phaseMode: d.phaseMode,
         acPhases: ((d.acWiring?.phases ?? 3).toString() as '1' | '3'),
         acNominalV: String(d.acWiring?.nominalVoltageV ?? 230),
@@ -78,6 +87,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
         if (form.firmwareVersion !== device.firmwareVersion) changed.push('firmware');
         if (Number(form.maxPowerKw) !== device.maxPowerKw) changed.push('max power');
         if (form.ocppUrl !== device.ocppUrl) changed.push('OCPP URL');
+        if (form.authPasswordDirty || form.authPasswordCleared) changed.push('auth password');
         return changed;
     }, [form, device]);
 
@@ -90,6 +100,8 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
             const mp = Number(form.maxPowerKw);
             if (Number.isFinite(mp) && mp > 0 && mp !== device.maxPowerKw) body.maxPowerKw = mp;
             if (form.ocppUrl.trim() !== device.ocppUrl) body.ocppUrl = form.ocppUrl.trim();
+            if (form.authPasswordDirty && form.authPasswordDraft) body.authPassword = form.authPasswordDraft;
+            else if (form.authPasswordCleared) body.authPassword = '';
             if (form.phaseMode !== device.phaseMode) body.phaseMode = form.phaseMode;
             if (device.type === 'AC') {
                 const ac = {
@@ -191,6 +203,44 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
                                 max="1000"
                                 required
                             />
+                        </Field>
+                        <Field label="OCPP auth password">
+                            <div className="flex gap-2">
+                                <Input
+                                    type="password"
+                                    autoComplete="new-password"
+                                    value={form.authPasswordDraft}
+                                    onChange={(e) =>
+                                        setForm((f) => ({
+                                            ...f,
+                                            authPasswordDraft: e.target.value,
+                                            authPasswordDirty: true,
+                                            authPasswordCleared: false,
+                                        }))
+                                    }
+                                    placeholder={device.hasAuthPassword ? '•••••• (set)' : 'leave blank for anonymous'}
+                                />
+                                {device.hasAuthPassword && !form.authPasswordCleared && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            setForm((f) => ({
+                                                ...f,
+                                                authPasswordDraft: '',
+                                                authPasswordDirty: false,
+                                                authPasswordCleared: true,
+                                            }))
+                                        }
+                                    >
+                                        Clear
+                                    </Button>
+                                )}
+                                {form.authPasswordCleared && (
+                                    <span className="self-center text-xs text-muted-foreground">will clear on save</span>
+                                )}
+                            </div>
                         </Field>
                     </Section>
 

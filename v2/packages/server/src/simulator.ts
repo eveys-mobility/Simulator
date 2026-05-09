@@ -20,7 +20,7 @@ import {
     ocppSessionEnergyWh,
     simTickLagSeconds,
 } from './metrics.js';
-import { type IncomingCallResult, OcppClient } from './ocpp-client.js';
+import { type IncomingCallResult, OcppClient, type OcppClientOptions } from './ocpp-client.js';
 import { OcppConfig } from './ocpp-config.js';
 import type { Store } from './store.js';
 
@@ -92,7 +92,7 @@ export class Simulator extends EventEmitter {
      *  the row first. The store is injected so we can do that inline. */
     private store: Store;
 
-    constructor(public readonly device: Device, store: Store) {
+    constructor(public readonly device: Device, store: Store, clientOptions: OcppClientOptions = {}) {
         super();
         this.store = store;
         const numConnectors = device.type === 'DC' ? 2 : 1;
@@ -123,7 +123,7 @@ export class Simulator extends EventEmitter {
                 }
             }
         });
-        this.client = new OcppClient(device);
+        this.client = new OcppClient(device, clientOptions);
         this.client.setIncomingHandler((action, payload) => this.handleCsmsCall(action, payload));
         this.client.on('online', () => this.handleOnline());
         this.client.on('offline', () => this.emit('state', { online: false }));

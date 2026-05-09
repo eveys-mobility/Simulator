@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { getToken } from './auth';
 import { type TraceEntry, useLiveStore } from './live-store';
 
 /**
@@ -28,7 +29,13 @@ export function useLiveWs() {
         const connect = () => {
             if (stopped) return;
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${proto}//${window.location.host}/api/ws`);
+            // Browser WebSocket can't set Authorization headers, so we
+            // smuggle the token through the query string. The server's
+            // auth hook accepts `?token=`, `Authorization: Bearer`, and
+            // the `bearer.<token>` subprotocol.
+            const token = getToken();
+            const url = `${proto}//${window.location.host}/api/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+            ws = new WebSocket(url);
 
             ws.onopen = () => {
                 attempt = 0;

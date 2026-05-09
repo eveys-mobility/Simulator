@@ -1,16 +1,32 @@
 import type { AcWiring, Connector, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
+import { clearToken, getToken } from './auth';
 
 export interface DeviceWithRuntime extends Device {
     online: boolean;
     connectors: Pick<Connector, 'id' | 'status'>[] & { transactionId?: number | null }[];
+    /** Backend strips the actual password; only this presence flag is sent. */
+    hasAuthPassword?: boolean;
 }
 
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (body) headers['Content-Type'] = 'application/json';
+    const token = getToken();
+    if (token) headers.authorization = `Bearer ${token}`;
     const res = await fetch(`/api${path}`, {
         method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 401) {
+        // Token was good when we loaded the page, but expired or got
+        // rotated server-side. Clear it and reload so the auth gate
+        // re-renders the login screen.
+        clearToken();
+        window.location.reload();
+        // Throw so the caller's promise chain still rejects.
+        throw new Error('unauthorized');
+    }
     if (res.status === 204) return undefined as T;
     if (!res.ok) {
         const text = await res.text().catch(() => res.statusText);
@@ -36,6 +52,7 @@ export const api = {
             firmwareVersion?: string;
             maxPowerKw?: number;
             ocppUrl?: string;
+            authPassword?: string;
             phaseMode?: PhaseMode;
             acWiring?: Partial<AcWiring>;
             dcProfile?: Partial<DCBatteryProfile>;

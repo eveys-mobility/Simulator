@@ -84,4 +84,27 @@ describe('AUTH_TOKEN gate', () => {
         expect(right.status).toBe(200);
         expect(await right.text()).toMatch(/ocpp_call_total/);
     });
+
+    it('/api/auth/ping reports whether auth is required (open even when set)', async () => {
+        const { app, base, store } = await setup('s3cret');
+        cleanup = async () => {
+            await app.close();
+            store.close();
+        };
+        const r = await fetch(`${base}/api/auth/ping`);
+        expect(r.status).toBe(200);
+        expect(await r.json()).toEqual({ authRequired: true });
+    });
+
+    it('?token= query param works for clients that cannot set headers (WS upgrade)', async () => {
+        const { app, base, store } = await setup('s3cret');
+        cleanup = async () => {
+            await app.close();
+            store.close();
+        };
+        const wrong = await fetch(`${base}/api/devices?token=nope`);
+        expect(wrong.status).toBe(401);
+        const right = await fetch(`${base}/api/devices?token=s3cret`);
+        expect(right.status).toBe(200);
+    });
 });
