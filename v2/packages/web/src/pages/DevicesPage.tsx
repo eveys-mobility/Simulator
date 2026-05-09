@@ -3,6 +3,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Search, 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LiveDot } from '@/components/LiveDot';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -78,10 +79,12 @@ export function DevicesPage() {
         onSuccess: (_data, deviceId) => {
             qc.invalidateQueries({ queryKey: ['devices'] });
             resetLiveDevice(deviceId);
+            setPendingDelete(null);
         },
     });
 
     const [showNew, setShowNew] = useState(false);
+    const [pendingDelete, setPendingDelete] = useState<DeviceWithRuntime | null>(null);
 
     /** Live-aware filter: an `online` change in WebSocket can flip a row's
      *  visibility immediately even if TanStack Query hasn't refetched yet. */
@@ -255,9 +258,7 @@ export function DevicesPage() {
                     devices={paged}
                     onlineMap={onlineMap}
                     connectorStatus={connectorStatus}
-                    onDelete={(d) => {
-                        if (confirm(`Delete ${d.displayName}?`)) remove.mutate(d.id);
-                    }}
+                    onDelete={(d) => setPendingDelete(d)}
                     deleting={remove.isPending}
                 />
             ) : (
@@ -265,9 +266,7 @@ export function DevicesPage() {
                     devices={paged}
                     onlineMap={onlineMap}
                     connectorStatus={connectorStatus}
-                    onDelete={(d) => {
-                        if (confirm(`Delete ${d.displayName}?`)) remove.mutate(d.id);
-                    }}
+                    onDelete={(d) => setPendingDelete(d)}
                     deleting={remove.isPending}
                 />
             )}
@@ -297,6 +296,29 @@ export function DevicesPage() {
                     </Button>
                 </div>
             )}
+
+            <ConfirmDialog
+                open={pendingDelete !== null}
+                onOpenChange={(o) => {
+                    if (!o) setPendingDelete(null);
+                }}
+                title="Delete device"
+                description={
+                    pendingDelete ? (
+                        <>
+                            Remove <span className="font-medium text-foreground">{pendingDelete.displayName}</span>{' '}
+                            <span className="font-mono text-xs text-muted-foreground">({pendingDelete.id})</span>{' '}
+                            from the simulator? Its session history is preserved on the Sessions page.
+                        </>
+                    ) : null
+                }
+                confirmText="Delete"
+                destructive
+                pending={remove.isPending}
+                onConfirm={() => {
+                    if (pendingDelete) remove.mutate(pendingDelete.id);
+                }}
+            />
         </div>
     );
 }

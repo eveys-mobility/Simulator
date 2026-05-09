@@ -22,6 +22,7 @@ export default defineConfig({
                     'vendor-query': ['@tanstack/react-query', 'zustand'],
                     'vendor-icons': ['lucide-react'],
                     'vendor-radix': [
+                        '@radix-ui/react-alert-dialog',
                         '@radix-ui/react-dialog',
                         '@radix-ui/react-dropdown-menu',
                         '@radix-ui/react-label',
