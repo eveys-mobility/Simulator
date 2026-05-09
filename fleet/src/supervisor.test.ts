@@ -36,6 +36,61 @@ const seed = (registry: Registry, store: FleetStore, cpId: string): void => {
     });
 };
 
+describe('WorkerSupervisor — heartbeat tracking', () => {
+    test('pong message updates last_pong_at on the handle', () => {
+        const registry = new Registry();
+        const store = new FleetStore(':memory:');
+        const sup = new WorkerSupervisor({ registry, store });
+        seed(registry, store, 'cp_aaa');
+
+        const handle: any = { worker: null, restart_attempts: 0, last_pong_at: 1000 };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (sup as any).applyUpMessage('cp_aaa', { type: 'pong', nonce: 42 }, handle);
+        // last_pong_at should now be Date.now() (much greater than 1000)
+        assert.ok(handle.last_pong_at > 1000, `expected updated last_pong_at, got ${handle.last_pong_at}`);
+
+        store.close();
+    });
+
+    test('checkWorkerLiveness terminates a stale worker', () => {
+        const registry = new Registry();
+        const store = new FleetStore(':memory:');
+        const sup = new WorkerSupervisor({ registry, store });
+        seed(registry, store, 'cp_aaa');
+
+        let terminated = false;
+        const handle: any = {
+            worker: { terminate: async () => { terminated = true; } },
+            restart_attempts: 0,
+            last_pong_at: Date.now() - 60_000, // 60 s of silence
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (sup as any).checkWorkerLiveness('cp_aaa', handle);
+        assert.equal(terminated, true);
+
+        store.close();
+    });
+
+    test('checkWorkerLiveness leaves a healthy worker alone', () => {
+        const registry = new Registry();
+        const store = new FleetStore(':memory:');
+        const sup = new WorkerSupervisor({ registry, store });
+        seed(registry, store, 'cp_aaa');
+
+        let terminated = false;
+        const handle: any = {
+            worker: { terminate: async () => { terminated = true; } },
+            restart_attempts: 0,
+            last_pong_at: Date.now() - 5_000, // 5 s — well within budget
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (sup as any).checkWorkerLiveness('cp_aaa', handle);
+        assert.equal(terminated, false);
+
+        store.close();
+    });
+});
+
 describe('WorkerSupervisor — session persistence', () => {
     test('session_started writes a row; session_ended completes it with peak power', () => {
         const registry = new Registry();

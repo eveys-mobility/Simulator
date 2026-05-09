@@ -36,11 +36,21 @@ interface WorkerHandle {
     /** Timestamp the worker became `ready`. Used to gate the restart
      *  counter reset above. */
     ready_at?: number;
+    /** Last pong timestamp from this worker. Updated on every pong;
+     *  watchdog reads this to decide if the worker is stale. */
+    last_pong_at?: number;
+    /** Heartbeat interval timer. Cleared on terminate. */
+    ping_timer?: NodeJS.Timeout;
+    /** Watchdog interval timer. Cleared on terminate. */
+    watchdog_timer?: NodeJS.Timeout;
 }
 
 const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const WORKER_HEALTHY_AFTER_MS = 60_000;
+const PING_INTERVAL_MS = 30_000;
+const WATCHDOG_TIMEOUT_MS = 10_000;
+const WATCHDOG_TICK_MS = 5_000;
 
 /**
  * Supervises N CP workers. Owns the worker_thread lifecycle and the
@@ -105,6 +115,7 @@ export class WorkerSupervisor {
         this.registry.remove(cpId);
         if (!handle) return;
         this.workers.delete(cpId);
+        this.clearHandleTimers(handle);
         try {
             handle.worker.postMessage({ type: 'shutdown' } as DownMessage);
             // Give the worker its 50 ms drain window, then force-stop.
@@ -177,6 +188,7 @@ export class WorkerSupervisor {
             const wasAlive = this.workers.get(spec.cp_id) === handle;
             this.workers.delete(spec.cp_id);
             this.registry.patch(spec.cp_id, { worker_alive: false, online: false });
+            this.clearHandleTimers(handle);
 
             if (this.shuttingDown || !this.specs.has(spec.cp_id)) return;
             if (!wasAlive) return; // already replaced
@@ -206,6 +218,57 @@ export class WorkerSupervisor {
             dc_profile: spec.dc_profile,
             max_power_kw: spec.max_power_kw,
         } as DownMessage);
+
+        // Heartbeat. Seed `last_pong_at` so the watchdog doesn't
+        // declare a worker stale before its first pong has had a
+        // chance to land.
+        handle.last_pong_at = Date.now();
+        handle.ping_timer = setInterval(() => {
+            try {
+                worker.postMessage({ type: 'ping', nonce: Date.now() } as DownMessage);
+            } catch {
+                // Worker may have exited between checks; the `exit`
+                // handler will respawn.
+            }
+        }, PING_INTERVAL_MS);
+        handle.watchdog_timer = setInterval(() => this.checkWorkerLiveness(spec.cp_id, handle), WATCHDOG_TICK_MS);
+    }
+
+    /**
+     * Watchdog: if no `pong` has arrived in WATCHDOG_TIMEOUT_MS, the
+     * worker is hung (event loop blocked, deadlock, or otherwise
+     * unresponsive). Force-terminate so the supervisor's `exit`
+     * handler kicks in and respawns. This is distinct from a clean
+     * crash, which the worker_threads runtime would surface via
+     * `error`/`exit` immediately.
+     */
+    private checkWorkerLiveness(cpId: string, handle: WorkerHandle): void {
+        if (!handle.last_pong_at) return;
+        const silence = Date.now() - handle.last_pong_at;
+        // The first pong is unlikely to land within the first ping
+        // interval; allow `PING_INTERVAL_MS + WATCHDOG_TIMEOUT_MS`
+        // before declaring stale.
+        if (silence > PING_INTERVAL_MS + WATCHDOG_TIMEOUT_MS) {
+            console.warn(`[supervisor] worker cp=${cpId} hung (no pong in ${Math.round(silence / 1000)}s); terminating`);
+            // Clear our timers explicitly — the `exit` handler will
+            // respawn but won't see them since they belong to this
+            // handle. Avoids a stale interval surviving the swap.
+            this.clearHandleTimers(handle);
+            handle.worker.terminate().catch(() => {
+                // Already gone; nothing to do.
+            });
+        }
+    }
+
+    private clearHandleTimers(handle: WorkerHandle): void {
+        if (handle.ping_timer) {
+            clearInterval(handle.ping_timer);
+            handle.ping_timer = undefined;
+        }
+        if (handle.watchdog_timer) {
+            clearInterval(handle.watchdog_timer);
+            handle.watchdog_timer = undefined;
+        }
     }
 
     private applyUpMessage(cpId: string, msg: UpMessage, handle: WorkerHandle): void {
@@ -284,6 +347,9 @@ export class WorkerSupervisor {
                 break;
             case 'error':
                 console[msg.level === 'error' ? 'error' : 'warn'](`[worker:${cpId}] ${msg.message}`);
+                break;
+            case 'pong':
+                handle.last_pong_at = Date.now();
                 break;
             // 'ready' already handled above.
         }

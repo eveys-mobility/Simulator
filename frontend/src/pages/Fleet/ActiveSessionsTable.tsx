@@ -1,5 +1,5 @@
 import React from 'react';
-import { Square } from 'lucide-react';
+import { Square, AlertTriangle } from 'lucide-react';
 import { fleetApi, FleetSession } from './fleet-api';
 
 interface ActiveSessionsTableProps {
@@ -24,6 +24,18 @@ export const ActiveSessionsTable: React.FC<ActiveSessionsTableProps> = ({ sessio
             onMutate();
         } catch (err: any) {
             onAction(`stop failed: ${err.message}`);
+        }
+    };
+
+    const handleFault = async (cp_id: string, connector_id: number): Promise<void> => {
+        try {
+            // 30 s self-clear so the connector recovers without
+            // operator action — load-test friendly, won't leave a
+            // grid of red tiles behind.
+            await fleetApi.faultConnector(cp_id, connector_id, 30);
+            onAction(`fault injected on ${cp_id} c${connector_id} (auto-clears in 30s)`);
+        } catch (err: any) {
+            onAction(`fault failed: ${err.message}`);
         }
     };
 
@@ -62,13 +74,21 @@ export const ActiveSessionsTable: React.FC<ActiveSessionsTableProps> = ({ sessio
                                         <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>
                                             {(s.energy_wh / 1000).toFixed(2)} kWh
                                         </td>
-                                        <td style={{ padding: '0.4rem 0.6rem' }}>
+                                        <td style={{ padding: '0.4rem 0.6rem', whiteSpace: 'nowrap' }}>
                                             <button
                                                 className="btn btn-secondary"
                                                 onClick={() => void handleStop(s.cp_id, s.connector_id)}
-                                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', marginRight: '0.25rem' }}
                                             >
                                                 <Square size={12} /> stop
+                                            </button>
+                                            <button
+                                                className="btn btn-secondary"
+                                                onClick={() => void handleFault(s.cp_id, s.connector_id)}
+                                                title="Inject a Faulted status (auto-clears in 30s)"
+                                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                            >
+                                                <AlertTriangle size={12} /> fault
                                             </button>
                                         </td>
                                     </tr>

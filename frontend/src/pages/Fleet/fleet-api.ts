@@ -123,6 +123,15 @@ export const fleetApi = {
             body: JSON.stringify({ connector_id }),
         }).then(() => undefined);
     },
+    /** Inject a fault on a connector. clear_after_seconds (optional)
+     *  auto-clears via the worker's own setTimeout. Useful for
+     *  testing CSMS fault handling. */
+    faultConnector(cp_id: string, connector_id: number, clear_after_seconds?: number): Promise<void> {
+        return request<{}>(`/cps/${cp_id}/actions/fault`, {
+            method: 'POST',
+            body: JSON.stringify({ connector_id, clear_after_seconds }),
+        }).then(() => undefined);
+    },
 
     // ---- sessions ----
 

@@ -43,6 +43,8 @@ export type DownMessage =
     | { type: 'emergency_stop'; connector_id: number }
     | { type: 'set_phase_mode'; mode: PhaseMode }
     | { type: 'set_dc_profile'; profile: DCBatteryProfile }
+    | { type: 'fault'; connector_id: number; clear_after_seconds?: number }
+    | { type: 'ping'; nonce: number }
     | { type: 'shutdown' };
 
 /** Worker → parent. */
@@ -75,7 +77,8 @@ export type UpMessage =
     | { type: 'error';
         level: 'warn' | 'error';
         message: string;
-      };
+      }
+    | { type: 'pong'; nonce: number };
 
 /**
  * Narrow runtime guards for the parent — workers can run untrusted
@@ -95,6 +98,7 @@ export function isUpMessage(value: unknown): value is UpMessage {
         'meter_tick',
         'connector_status',
         'error',
+        'pong',
     ].includes(t);
 }
 
@@ -110,6 +114,8 @@ export function isDownMessage(value: unknown): value is DownMessage {
         'emergency_stop',
         'set_phase_mode',
         'set_dc_profile',
+        'fault',
+        'ping',
         'shutdown',
     ].includes(t);
 }
