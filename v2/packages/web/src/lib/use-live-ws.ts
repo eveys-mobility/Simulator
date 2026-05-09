@@ -93,6 +93,14 @@ export function useLiveWs() {
                         qc.invalidateQueries({ queryKey: ['benchmark-runs'] });
                         break;
                     }
+                    case 'frames-coalesced': {
+                        // Server-side hint that the broadcast hub
+                        // dropped repetitive MeterValues/Heartbeat
+                        // frames inside the flush window. The trace
+                        // viewer doesn't try to be lossless under load
+                        // — there's nothing to do here.
+                        break;
+                    }
                     case 'frame': {
                         const p = msg.payload as Partial<TraceEntry>;
                         if (

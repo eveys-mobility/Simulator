@@ -37,12 +37,18 @@ export class Store {
     // ---- devices ----
 
     listDevices(): Device[] {
-        const rows = this.db.prepare(`SELECT * FROM devices ORDER BY created_at`).all() as DeviceRow[];
+        // Soft-deleted rows stay in the table so historical sessions
+        // keep their FK target — but they don't show up in any list.
+        const rows = this.db
+            .prepare(`SELECT * FROM devices WHERE deleted_at IS NULL ORDER BY created_at`)
+            .all() as DeviceRow[];
         return rows.map(rowToDevice);
     }
 
     getDevice(id: string): Device | null {
-        const row = this.db.prepare(`SELECT * FROM devices WHERE id = ?`).get(id) as DeviceRow | undefined;
+        const row = this.db
+            .prepare(`SELECT * FROM devices WHERE id = ? AND deleted_at IS NULL`)
+            .get(id) as DeviceRow | undefined;
         return row ? rowToDevice(row) : null;
     }
 
@@ -134,7 +140,13 @@ export class Store {
     }
 
     deleteDevice(id: string): boolean {
-        const r = this.db.prepare(`DELETE FROM devices WHERE id = ?`).run(id);
+        // Soft delete. Sessions and config rows have FK ON DELETE CASCADE,
+        // which would wipe the audit trail if we hard-deleted; the
+        // soft path keeps history intact and is reversible if we ever
+        // add an "undelete" UI.
+        const r = this.db
+            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
+            .run(new Date().toISOString(), id);
         return r.changes > 0;
     }
 
@@ -445,6 +457,7 @@ interface DeviceRow {
     ac_wiring: string | null;
     dc_profile: string | null;
     created_at: string;
+    deleted_at: string | null;
 }
 
 function rowToDevice(r: DeviceRow): Device {
@@ -647,6 +660,14 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // should be injected at deploy time, not stored in this DB.
     (db) => {
         db.exec(`ALTER TABLE devices ADD COLUMN auth_password TEXT`);
+    },
+    // v8 — soft-delete column. Hard-deleting a device used to cascade
+    // through the FK and drop every session row, wiping audit history.
+    // We now mark deleted_at instead and filter on read; the device's
+    // simulator is despawned, but the rows stick around for /sessions.
+    (db) => {
+        db.exec(`ALTER TABLE devices ADD COLUMN deleted_at TEXT`);
+        db.exec(`CREATE INDEX devices_deleted_at ON devices(deleted_at)`);
     },
 ];
 

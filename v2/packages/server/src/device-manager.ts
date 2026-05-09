@@ -66,14 +66,17 @@ export class DeviceManager extends EventEmitter {
         }
     }
 
-    async despawn(id: string): Promise<void> {
+    async despawn(id: string, reason = 'PowerLoss'): Promise<void> {
         const sim = this.sims.get(id);
         if (!sim) return;
         try {
-            // Stop any active sessions on the way out.
+            // Stop any active sessions on the way out so their rows
+            // don't stay 'active' in the audit trail. Caller picks the
+            // OCPP reason — delete uses 'Other', boot-time cleanup
+            // uses 'PowerLoss'.
             for (const c of sim.snapshot().connectors) {
                 if (c.transactionId !== null) {
-                    await sim.stopSession(c.id, 'PowerLoss').catch(() => undefined);
+                    await sim.stopSession(c.id, reason).catch(() => undefined);
                 }
             }
         } finally {
