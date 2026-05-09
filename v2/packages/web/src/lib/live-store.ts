@@ -23,13 +23,39 @@ export interface LiveTick {
     at: number;
 }
 
+export interface TraceEntry {
+    /** Monotonic local id. Pubsub frames don't carry their own ordinal,
+     *  and the OCPP message-id only correlates a CALL with its
+     *  CALLRESULT — not a global stream order. The store assigns this. */
+    seq: number;
+    deviceId: string;
+    direction: 'in' | 'out';
+    /** OCPP action name. For CALLRESULT/CALLERROR the server reports
+     *  the action of the matched original CALL. */
+    action: string;
+    /** OCPP message id (uuid string). */
+    id: string;
+    /** Wall-clock ms when the server saw the frame. */
+    at: number;
+    payload: unknown;
+}
+
+const TRACE_LIMIT = 500;
+
 interface LiveState {
     online: Map<string, boolean>;
     connectorStatus: Map<string, ConnectorStatus>; // key = `${deviceId}:${connectorId}`
     tick: Map<string, LiveTick>; // same key
+    /** Per-device ring buffer of OCPP frames, capped at TRACE_LIMIT.
+     *  Cheap: clones the slice on push, but slice cost is O(limit) and
+     *  fires at OCPP rate (≪10/s), not React render rate. */
+    traces: Map<string, TraceEntry[]>;
+    nextTraceSeq: number;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
     applyTick: (t: MeterTick) => void;
+    appendFrame: (e: Omit<TraceEntry, 'seq'>) => void;
+    clearTraces: (deviceId: string) => void;
     reset: (deviceId: string) => void;
 }
 
@@ -37,6 +63,8 @@ export const useLiveStore = create<LiveState>((set) => ({
     online: new Map(),
     connectorStatus: new Map(),
     tick: new Map(),
+    traces: new Map(),
+    nextTraceSeq: 0,
 
     setOnline: (deviceId, online) =>
         set((s) => {
@@ -64,13 +92,36 @@ export const useLiveStore = create<LiveState>((set) => ({
             return { tick: next };
         }),
 
+    appendFrame: (e) =>
+        set((s) => {
+            const seq = s.nextTraceSeq + 1;
+            const entry: TraceEntry = { seq, ...e };
+            const next = new Map(s.traces);
+            const existing = next.get(e.deviceId) ?? [];
+            const updated =
+                existing.length >= TRACE_LIMIT
+                    ? [...existing.slice(existing.length - TRACE_LIMIT + 1), entry]
+                    : [...existing, entry];
+            next.set(e.deviceId, updated);
+            return { traces: next, nextTraceSeq: seq };
+        }),
+
+    clearTraces: (deviceId) =>
+        set((s) => {
+            const next = new Map(s.traces);
+            next.set(deviceId, []);
+            return { traces: next };
+        }),
+
     reset: (deviceId) =>
         set((s) => {
             const cs = new Map(s.connectorStatus);
             const tk = new Map(s.tick);
+            const tr = new Map(s.traces);
             for (const k of [...cs.keys()]) if (k.startsWith(`${deviceId}:`)) cs.delete(k);
             for (const k of [...tk.keys()]) if (k.startsWith(`${deviceId}:`)) tk.delete(k);
-            return { connectorStatus: cs, tick: tk };
+            tr.delete(deviceId);
+            return { connectorStatus: cs, tick: tk, traces: tr };
         }),
 }));
 

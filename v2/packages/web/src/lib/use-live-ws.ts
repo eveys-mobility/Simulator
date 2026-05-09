@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { useLiveStore } from './live-store';
+import { type TraceEntry, useLiveStore } from './live-store';
 
 /**
  * Mounts a single WebSocket connection per browser session, fans
@@ -15,6 +15,7 @@ export function useLiveWs() {
     const setOnline = useLiveStore((s) => s.setOnline);
     const setConnectorStatus = useLiveStore((s) => s.setConnectorStatus);
     const applyTick = useLiveStore((s) => s.applyTick);
+    const appendFrame = useLiveStore((s) => s.appendFrame);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -66,6 +67,26 @@ export function useLiveWs() {
                         qc.invalidateQueries({ queryKey: ['devices'] });
                         break;
                     }
+                    case 'frame': {
+                        const p = msg.payload as Partial<TraceEntry>;
+                        if (
+                            p &&
+                            typeof p.deviceId === 'string' &&
+                            (p.direction === 'in' || p.direction === 'out') &&
+                            typeof p.action === 'string' &&
+                            typeof p.id === 'string'
+                        ) {
+                            appendFrame({
+                                deviceId: p.deviceId,
+                                direction: p.direction,
+                                action: p.action,
+                                id: p.id,
+                                at: typeof p.at === 'number' ? p.at : Date.now(),
+                                payload: p.payload,
+                            });
+                        }
+                        break;
+                    }
                 }
             };
 
@@ -87,5 +108,5 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, qc]);
+    }, [setOnline, setConnectorStatus, applyTick, appendFrame, qc]);
 }
