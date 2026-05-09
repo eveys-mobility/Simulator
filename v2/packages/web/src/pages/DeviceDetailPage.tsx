@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pause, Play, Square } from 'lucide-react';
+import { ArrowLeft, Pencil, Play, Square } from 'lucide-react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
 
 export function DeviceDetailPage() {
     const { id = '' } = useParams<{ id: string }>();
     const qc = useQueryClient();
+    const [editing, setEditing] = useState(false);
 
     const { data: device, isLoading } = useQuery({
         queryKey: ['devices', id],
@@ -49,7 +52,7 @@ export function DeviceDetailPage() {
                         <ArrowLeft className="h-4 w-4" />
                     </Button>
                 </Link>
-                <div>
+                <div className="flex-1">
                     <div className="flex items-center gap-2">
                         <Badge variant={device.type === 'DC' ? 'dc' : 'ac'}>{device.type}</Badge>
                         <h1 className="text-2xl font-semibold">{device.displayName}</h1>
@@ -57,7 +60,13 @@ export function DeviceDetailPage() {
                     </div>
                     <p className="font-mono text-xs text-muted-foreground">{device.id}</p>
                 </div>
+                <Button variant="outline" onClick={() => setEditing(true)}>
+                    <Pencil className="h-4 w-4" /> Edit
+                </Button>
             </div>
+
+            <EditDeviceDialog device={device} open={editing} onOpenChange={setEditing} />
+
 
             <Card>
                 <CardHeader>

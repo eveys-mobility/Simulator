@@ -56,6 +56,24 @@ export class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Tear down + bring back up with a fresh device row. Used by edits
+     * that change socket-affecting fields (ocppUrl, vendor, firmwareVersion,
+     * maxPowerKw): the new BootNotification has to reannounce, and the
+     * model name + max-power feed into the gateway's view of the device.
+     */
+    async respawn(device: Device): Promise<void> {
+        await this.despawn(device.id);
+        await this.spawn(device);
+    }
+
+    /** True if any connector has an open transaction. */
+    hasActiveSession(id: string): boolean {
+        const sim = this.sims.get(id);
+        if (!sim) return false;
+        return sim.snapshot().connectors.some((c) => c.transactionId !== null);
+    }
+
     async stopAll(): Promise<void> {
         await Promise.all([...this.sims.keys()].map((id) => this.despawn(id)));
     }

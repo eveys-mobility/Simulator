@@ -28,8 +28,18 @@ export const api = {
         maxPowerKw?: number;
         phaseMode?: PhaseMode;
     }) => http<DeviceWithRuntime>('POST', '/devices', body),
-    updateDevice: (id: string, body: { displayName?: string; phaseMode?: PhaseMode; dcProfile?: Partial<DCBatteryProfile> }) =>
-        http<DeviceWithRuntime>('PATCH', `/devices/${id}`, body),
+    updateDevice: (
+        id: string,
+        body: {
+            displayName?: string;
+            vendor?: string;
+            firmwareVersion?: string;
+            maxPowerKw?: number;
+            ocppUrl?: string;
+            phaseMode?: PhaseMode;
+            dcProfile?: Partial<DCBatteryProfile>;
+        },
+    ) => http<DeviceWithRuntime>('PATCH', `/devices/${id}`, body),
     deleteDevice: (id: string) => http<void>('DELETE', `/devices/${id}`),
     startSession: (deviceId: string, connectorId: number) =>
         http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
