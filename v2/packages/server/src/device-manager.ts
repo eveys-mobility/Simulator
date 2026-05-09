@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Device } from '@ocpp-sim/core';
 import { ocppActiveDevices } from './metrics.js';
+import type { OcppClientOptions } from './ocpp-client.js';
 import { Simulator } from './simulator.js';
 import type { Store } from './store.js';
 
@@ -16,7 +17,10 @@ export class DeviceManager extends EventEmitter {
     private sims = new Map<string, Simulator>();
     private online = new Set<string>();
 
-    constructor(private readonly store: Store) {
+    constructor(
+        private readonly store: Store,
+        private readonly clientOptions: OcppClientOptions = {},
+    ) {
         super();
     }
 
@@ -37,7 +41,7 @@ export class DeviceManager extends EventEmitter {
 
     async spawn(device: Device): Promise<void> {
         if (this.sims.has(device.id)) return;
-        const sim = new Simulator(device, this.store);
+        const sim = new Simulator(device, this.store, this.clientOptions);
         sim.on('state', (s: { online?: boolean; connectorId?: number; status?: string }) => {
             if (typeof s.online === 'boolean') {
                 if (s.online) this.online.add(device.id);

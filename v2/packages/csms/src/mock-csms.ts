@@ -23,6 +23,9 @@ interface DeviceState {
     waiters: { action: string; resolve: (frame: RecordedFrame) => void }[];
     /** Listeners awaiting any frame (used by waitForBoot etc.). */
     anyFrameWaiters: ((frame: RecordedFrame) => void)[];
+    /** HTTP upgrade headers sent by the device. Lets tests assert on
+     *  Authorization etc. */
+    upgradeHeaders: Record<string, string | string[] | undefined>;
 }
 
 /**
@@ -68,7 +71,7 @@ export class MockCsms {
             });
             this.wss?.on('error', reject);
         });
-        this.wss.on('connection', (ws, req) => this.onConnection(ws, req.url ?? '/'));
+        this.wss.on('connection', (ws, req) => this.onConnection(ws, req.url ?? '/', req.headers));
     }
 
     async stop(): Promise<void> {
@@ -141,7 +144,11 @@ export class MockCsms {
 
     // ---- Internals ----
 
-    private onConnection(ws: WebSocket, urlPath: string): void {
+    private onConnection(
+        ws: WebSocket,
+        urlPath: string,
+        headers: Record<string, string | string[] | undefined>,
+    ): void {
         // url is `/<deviceId>` (no query string handling; OCPP URLs are bare).
         const deviceId = decodeURIComponent(urlPath.replace(/^\//, '').split('?')[0] ?? '');
         if (!deviceId) {
@@ -155,6 +162,7 @@ export class MockCsms {
             pending: new Map(),
             waiters: [],
             anyFrameWaiters: [],
+            upgradeHeaders: headers,
         };
         this.devices.set(deviceId, state);
         ws.on('message', (data) => this.onMessage(state, data.toString()));

@@ -57,6 +57,12 @@ export const DeviceSchema = z.object({
     firmwareVersion: z.string().default('1.0.0'),
     maxPowerKw: z.number().positive(),
     ocppUrl: z.string().url(),
+    /**
+     * Password for OCPP basic auth on the WS upgrade (OCPP 1.6 §17.4).
+     * When set, the client sends `Authorization: Basic base64(deviceId:password)`.
+     * Empty/undefined means anonymous — most dev gateways accept that.
+     */
+    authPassword: z.string().min(1).optional(),
     phaseMode: PhaseModeSchema.default('balanced'),
     acWiring: AcWiringSchema.optional(),
     dcProfile: DCBatteryProfileSchema.optional(),

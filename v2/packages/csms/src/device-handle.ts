@@ -11,6 +11,7 @@ interface DeviceState {
     frames: RecordedFrame[];
     waiters: { action: string; resolve: (frame: RecordedFrame) => void }[];
     anyFrameWaiters: ((frame: RecordedFrame) => void)[];
+    upgradeHeaders: Record<string, string | string[] | undefined>;
 }
 
 type CallDevice = (action: string, payload: unknown) => Promise<unknown>;
@@ -31,6 +32,12 @@ export class DeviceHandle {
 
     get deviceId(): string {
         return this.state.deviceId;
+    }
+
+    /** HTTP upgrade headers from the WS handshake. Useful for asserting
+     *  on Authorization / User-Agent / etc. Lower-cased keys (Node convention). */
+    get upgradeHeaders(): Record<string, string | string[] | undefined> {
+        return this.state.upgradeHeaders;
     }
 
     /** Snapshot of every frame seen on this device's socket so far. */

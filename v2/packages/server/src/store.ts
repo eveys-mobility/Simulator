@@ -51,9 +51,9 @@ export class Store {
             .prepare(
                 `INSERT INTO devices
                   (id, display_name, type, model, vendor, firmware_version, max_power_kw, ocpp_url,
-                   phase_mode, ac_wiring, dc_profile, created_at)
+                   auth_password, phase_mode, ac_wiring, dc_profile, created_at)
                  VALUES (@id, @displayName, @type, @model, @vendor, @firmwareVersion, @maxPowerKw, @ocppUrl,
-                         @phaseMode, @acWiring, @dcProfile, @createdAt)`,
+                         @authPassword, @phaseMode, @acWiring, @dcProfile, @createdAt)`,
             )
             .run({
                 id: d.id,
@@ -64,6 +64,7 @@ export class Store {
                 firmwareVersion: d.firmwareVersion,
                 maxPowerKw: d.maxPowerKw,
                 ocppUrl: d.ocppUrl,
+                authPassword: d.authPassword ?? null,
                 phaseMode: d.phaseMode,
                 acWiring: d.acWiring ? JSON.stringify(d.acWiring) : null,
                 dcProfile: d.dcProfile ? JSON.stringify(d.dcProfile) : null,
@@ -81,6 +82,7 @@ export class Store {
                 | 'firmwareVersion'
                 | 'maxPowerKw'
                 | 'ocppUrl'
+                | 'authPassword'
                 | 'phaseMode'
                 | 'acWiring'
                 | 'dcProfile'
@@ -108,6 +110,12 @@ export class Store {
         if (patch.ocppUrl !== undefined) {
             sets.push('ocpp_url = @ocppUrl');
             params.ocppUrl = patch.ocppUrl;
+        }
+        if (patch.authPassword !== undefined) {
+            sets.push('auth_password = @authPassword');
+            // Empty string clears the password (anonymous mode); the
+            // schema lets the column be NULL.
+            params.authPassword = patch.authPassword === '' ? null : patch.authPassword;
         }
         if (patch.phaseMode !== undefined) {
             sets.push('phase_mode = @phaseMode');
@@ -432,6 +440,7 @@ interface DeviceRow {
     firmware_version: string;
     max_power_kw: number;
     ocpp_url: string;
+    auth_password: string | null;
     phase_mode: string;
     ac_wiring: string | null;
     dc_profile: string | null;
@@ -448,6 +457,7 @@ function rowToDevice(r: DeviceRow): Device {
         firmwareVersion: r.firmware_version,
         maxPowerKw: r.max_power_kw,
         ocppUrl: r.ocpp_url,
+        authPassword: r.auth_password ?? undefined,
         phaseMode: r.phase_mode as PhaseMode,
         acWiring: r.ac_wiring ? (JSON.parse(r.ac_wiring) as AcWiring) : undefined,
         dcProfile: r.dc_profile ? (JSON.parse(r.dc_profile) as DCBatteryProfile) : undefined,
@@ -630,6 +640,13 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
             );
             CREATE INDEX charging_profiles_device ON charging_profiles(device_id);
         `);
+    },
+    // v7 — OCPP basic-auth password per device (§17.4). Stored in plain
+    // text on purpose: this is a dev/test simulator and the secret is
+    // already on the wire as Basic auth. Real production credentials
+    // should be injected at deploy time, not stored in this DB.
+    (db) => {
+        db.exec(`ALTER TABLE devices ADD COLUMN auth_password TEXT`);
     },
 ];
 
