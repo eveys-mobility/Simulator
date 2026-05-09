@@ -419,6 +419,8 @@ Each MR targets the previous (`main` ← MR-D ← MR-E ← MR-F ← MR-G ← MR-
 
 2. **Single-CP UI deep-linking.** Yes — as a small change inside MR-G, not a refactor. The existing `App.tsx` accepts `?cp=<cp_id>` from the URL: when present, it drops the local backend connection and subscribes to the fleet manager's pubsub channel for that CP id; when absent, it stays as today (connects to its own `:3001` backend). Backwards-compatible, ~50 LOC in `App.tsx` + `services/api.ts`. No per-CP backend process needed for UI viewing — the fleet manager already holds that state via worker pubsub.
 
+   **Implementation status (post-MVP):** landed as a follow-up after MR-H. `services/api.ts` reads `?cp=` once at module load; in fleet mode `getStatus()` GETs `/fleet/cps/:cp_id` and adapts the row into the existing `Status` shape, `connectWebSocket` opens `/fleet/ws` and sends `{type:'subscribe',cp_id}`, `startCharging` / `stopCharging` route to `/fleet/cps/:cp_id/actions/*`. Pause/resume/scenarios/manual-consumption surface a friendly "not in fleet mode" message — those are out of scope for the deep-link view. The `FleetPubSub` gained per-cp_id subscriptions: `meter_tick` is unicast to subscribers only, so the fleet dashboard's clients don't see N CPs × 1 Hz tick fan-out.
+
 3. **Dev reset.** Yes — `POST /fleet/_dev/reset` exists, gated by `EVEYS_FLEET_DEV_RESET=1`. Behavior: drops the SQLite tables, terminates all workers, re-bootstraps from `fixtures.ts`. Returns 403 if the env var isn't set to `1`. Logs loudly at WARN on invocation. Without this, every integration/load test ends up either hand-rolling teardown or `rm -f`'ing the SQLite file — both worse than a gated endpoint.
 
 ## Decisions deferred to implementation
