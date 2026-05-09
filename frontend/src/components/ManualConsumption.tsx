@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Zap, Send } from 'lucide-react';
+import { api } from '../services/api';
 
 interface ManualConsumptionProps {
+    connectorId: number;
     hasActiveSession: boolean;
     onAction: (message: string) => void;
 }
 
-export function ManualConsumption({ hasActiveSession, onAction }: ManualConsumptionProps) {
+export function ManualConsumption({ connectorId, hasActiveSession, onAction }: ManualConsumptionProps) {
     const [energy, setEnergy] = useState('1000');
     const [sendMode, setSendMode] = useState<'single' | 'split'>('single');
     const [splitCount, setSplitCount] = useState('5');
@@ -14,7 +16,7 @@ export function ManualConsumption({ hasActiveSession, onAction }: ManualConsumpt
 
     const handleSend = async () => {
         if (!hasActiveSession) {
-            onAction('No active charging session');
+            onAction(`Connector ${connectorId}: no active session`);
             return;
         }
 
@@ -26,24 +28,19 @@ export function ManualConsumption({ hasActiveSession, onAction }: ManualConsumpt
 
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:3001/api/manual-consumption', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    energyWh,
-                    mode: sendMode,
-                    splitCount: sendMode === 'split' ? parseInt(splitCount) : 1
-                })
+            const result = await api.manualConsumption({
+                connectorId,
+                energyWh,
+                mode: sendMode,
+                splitCount: sendMode === 'split' ? parseInt(splitCount) : 1,
             });
-
-            const result = await response.json();
             if (result.success) {
-                onAction(`Manual consumption sent: ${energyWh} Wh (${sendMode} mode)`);
+                onAction(`Connector ${connectorId}: sent ${energyWh} Wh (${sendMode})`);
             } else {
-                onAction(`Error: ${result.message}`);
+                onAction(`Connector ${connectorId} error: ${result.message ?? 'unknown'}`);
             }
         } catch (error: any) {
-            onAction(`Error: ${error.message}`);
+            onAction(`Connector ${connectorId} error: ${error.message}`);
         } finally {
             setLoading(false);
         }
@@ -54,7 +51,7 @@ export function ManualConsumption({ hasActiveSession, onAction }: ManualConsumpt
             <div className="card-header">
                 <h3 className="card-title">
                     <Zap size={20} />
-                    Manual Consumption Testing
+                    Connector {connectorId} — Manual Consumption
                 </h3>
             </div>
             <div className="card-body">

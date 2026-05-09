@@ -8,12 +8,20 @@ import { AuthorizationManager } from './ocpp/AuthorizationManager';
 import { ScenarioEngine } from './simulation/ScenarioEngine';
 import { createApiRoutes } from './api/routes';
 import { WebSocketServer } from './api/websocket';
-import { ChargePointConfiguration } from './models/Configuration';
+import { ChargePointConfiguration, ConnectorStatus } from './models/Configuration';
+import { logger, LogEntry } from './utils/logger';
 
 // Load environment variables
 dotenv.config();
 
 const PORT = process.env.API_PORT || 3001;
+
+// Stamp every log entry with the cp_id so frontend filters and grep
+// over multiple sims line up. Set min level from env so devs can flip
+// to debug without a code change.
+logger.setCpId(process.env.CHARGE_POINT_ID || 'CP001');
+const envLevel = (process.env.LOG_LEVEL || 'info') as 'debug' | 'info' | 'warn' | 'error';
+logger.setMinLevel(envLevel);
 
 // Create charge point configuration
 const config: ChargePointConfiguration = {
@@ -23,7 +31,7 @@ const config: ChargePointConfiguration = {
     connectorType: 'Type2',
     voltage: parseInt(process.env.VOLTAGE || '400'),
     maxCurrent: parseInt(process.env.MAX_CURRENT || '32'),
-    numberOfConnectors: 1,
+    numberOfConnectors: parseInt(process.env.NUMBER_OF_CONNECTORS || '2'),
     meterValueInterval: parseInt(process.env.METER_VALUE_INTERVAL || '60'),
     heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL || '300')
 };
@@ -41,8 +49,20 @@ transactionManager.setAuthorizationManager(authorizationManager);
 
 const scenarioEngine = new ScenarioEngine(chargePoint, transactionManager);
 
-// Connect to OCPP server
-chargePoint.connect();
+// Connect to OCPP server. Don't crash on initial-connect failures
+// (CALLERROR from CSMS, network glitch) — `ChargePoint.scheduleReconnect`
+// already retries every 5 s, so we just log and let it heal.
+chargePoint.connect().catch((err: Error) => {
+    console.error('[Server] Initial connect failed; reconnect loop will retry:', err.message);
+});
+
+// Last-line-of-defense: any other unhandled promise rejection (e.g. a CALLERROR
+// for a request whose caller forgot a .catch) should log, not exit(1). The
+// process stays up so the WebSocket reconnect loop can recover.
+process.on('unhandledRejection', (reason: unknown) => {
+    const msg = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+    console.error('[Server] Unhandled promise rejection:', msg);
+});
 
 
 // Create Express app
@@ -51,6 +71,13 @@ const server = http.createServer(app);
 
 // Initialize WebSocket server
 const wsServer = new WebSocketServer(server);
+
+// Stream every structured log entry to connected UI clients. Subscribed
+// here (after wsServer exists) rather than inside the logger module so
+// the logger stays a leaf with no coupling to the websocket plumbing.
+logger.on('entry', (entry: LogEntry) => {
+    wsServer.broadcastTrace(entry);
+});
 
 // Middleware
 app.use(cors({
@@ -74,6 +101,35 @@ chargePoint.on('connected', () => {
 
 chargePoint.on('disconnected', () => {
     wsServer.broadcastEvent('disconnected', { timestamp: new Date() });
+});
+
+// Handle boot completed - check for active sessions and orphaned transactions
+chargePoint.on('bootCompleted', async () => {
+    console.log('[Server] Boot completed, checking for active sessions and orphaned transactions');
+
+    // Check for active sessions from TransactionManager
+    const activeSessions = transactionManager.getAllSessions();
+    if (activeSessions.length > 0) {
+        console.log(`[Server] Found ${activeSessions.length} active session(s), notifying server`);
+        for (const session of activeSessions) {
+            // Update connector status to reflect active session
+            const connectorStatus = session.status === 'Charging' ? ConnectorStatus.Charging : ConnectorStatus.Preparing;
+            await chargePoint.sendStatusNotification(session.connectorId, connectorStatus);
+            console.log(`[Server] Sent status notification for connector ${session.connectorId}: ${connectorStatus}`);
+        }
+    }
+
+    // Check for orphaned transactions that need to be stopped
+    const orphanedTransactions = transactionManager.getOrphanedTransactions();
+    if (orphanedTransactions.length > 0) {
+        console.log(`[Server] Found ${orphanedTransactions.length} orphaned transaction(s)`);
+        // These are transactions that were started but the device lost connection
+        // They should be stopped on reconnection
+        for (const txn of orphanedTransactions) {
+            console.log(`[Server] Orphaned transaction found: ${JSON.stringify(txn)}`);
+            // Optionally stop them automatically or log for manual intervention
+        }
+    }
 });
 
 chargePoint.on('error', (error: Error) => {
@@ -116,31 +172,77 @@ scenarioEngine.on('scenarioExecuted', (event) => {
     wsServer.broadcastEvent('scenarioExecuted', event);
 });
 
-// Periodic status updates
+// Periodic status updates. The shape MUST match /api/status — the
+// frontend handles both transports with the same reducer, so any field
+// the HTTP poll surfaces (connectors, numberOfConnectors, ...) must
+// also flow through the WebSocket push, otherwise listeners overwrite
+// good state with a partial payload twice a second.
 setInterval(() => {
     const sessions = transactionManager.getAllSessions();
+    const connectorCount = chargePoint.getNumberOfConnectors();
+    const connectors = [];
+    for (let id = 1; id <= connectorCount; id++) {
+        connectors.push({
+            id,
+            status: chargePoint.getConnectorStatus(id),
+            hasActiveSession: transactionManager.hasActiveSession(id),
+        });
+    }
+
     wsServer.broadcastStatus({
         connected: chargePoint.isConnectedToServer(),
+        numberOfConnectors: connectorCount,
         sessions: sessions.map(session => ({
             connectorId: session.connectorId,
             transactionId: session.transactionId,
+            idTag: session.idTag,
             status: session.status,
             powerKw: session.powerKw,
             energyKwh: session.energyKwh,
-            duration: session.duration
+            duration: session.duration,
+            startTime: session.startTime,
         })),
-        timestamp: new Date()
+        connectors,
+        timestamp: new Date(),
     });
 }, 2000);
 
 // Handle remote start transaction from OCPP server
 chargePoint.on('remoteStartTransaction', async (data: { connectorId: number; idTag: string; isRemoteStart: boolean }) => {
     try {
-        console.log('[Server] Remote start transaction event received:', data);
-        // Pass isRemoteStart flag to use server transaction ID
+        logger.info('Server', 'remote_start.dispatch', { connector_id: data.connectorId, id_tag: data.idTag });
         await transactionManager.startTransaction(data.connectorId, data.idTag, data.isRemoteStart);
     } catch (error) {
-        console.error('[Server] Error handling remote start transaction:', error);
+        logger.error('Server', 'remote_start.failed', { connector_id: data.connectorId, id_tag: data.idTag, error: (error as Error).message });
+    }
+});
+
+// Handle remote stop transaction from OCPP server
+chargePoint.on('remoteStopTransaction', async (payload: { transactionId: number }) => {
+    try {
+        console.log('[Server] Remote stop transaction event received:', payload);
+        console.log('[Server] Looking for transaction ID:', payload.transactionId);
+
+        // Find the session with the matching transaction ID
+        const sessions = transactionManager.getAllSessions();
+        console.log('[Server] Active sessions:', sessions.map(s => ({
+            connectorId: s.connectorId,
+            transactionId: s.transactionId,
+            idTag: s.idTag,
+            status: s.status
+        })));
+
+        const session = sessions.find(s => s.transactionId === payload.transactionId);
+
+        if (session) {
+            console.log(`[Server] Found session! Stopping transaction ${payload.transactionId} on connector ${session.connectorId}`);
+            await transactionManager.stopTransaction(session.connectorId, 'Remote');
+        } else {
+            console.warn(`[Server] Transaction ${payload.transactionId} not found in active sessions`);
+            console.warn(`[Server] Available transaction IDs:`, sessions.map(s => s.transactionId));
+        }
+    } catch (error) {
+        console.error('[Server] Error handling remote stop transaction:', error);
     }
 });
 

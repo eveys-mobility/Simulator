@@ -12,14 +12,17 @@ export interface ChargingSession {
     startTime: string;
 }
 
+export interface ConnectorState {
+    id: number;
+    status: string;
+    hasActiveSession: boolean;
+}
+
 export interface Status {
     connected: boolean;
     sessions: ChargingSession[];
-    connectors: Array<{
-        id: number;
-        status: string;
-        hasActiveSession: boolean;
-    }>;
+    connectors: ConnectorState[];
+    numberOfConnectors?: number;
 }
 
 class ApiService {
@@ -187,6 +190,20 @@ class ApiService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ idTag })
+        });
+        return response.json();
+    }
+
+    async manualConsumption(params: {
+        connectorId?: number;
+        energyWh: number;
+        mode: 'single' | 'split';
+        splitCount?: number;
+    }): Promise<any> {
+        const response = await fetch(`${API_BASE_URL}/manual-consumption`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
         });
         return response.json();
     }

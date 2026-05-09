@@ -11,10 +11,25 @@ export class ConfigurationManager extends EventEmitter {
     private configuration: Map<string, OCPPConfiguration> = new Map();
     private configFilePath: string;
 
-    constructor(chargePointId: string) {
+    constructor(chargePointId: string, numberOfConnectors?: number) {
         super();
         this.configFilePath = path.join(process.cwd(), 'data', `config_${chargePointId}.json`);
         this.loadConfiguration();
+        // The runtime connector count (from server.ts config / env) is the
+        // source of truth — always overwrite whatever was in the saved
+        // file or the defaults so the OCPP `NumberOfConnectors` advertised
+        // back to the CSMS matches the simulator's actual setup.
+        if (typeof numberOfConnectors === 'number' && Number.isFinite(numberOfConnectors)) {
+            const existing = this.configuration.get('NumberOfConnectors');
+            if (!existing || existing.value !== String(numberOfConnectors)) {
+                this.configuration.set('NumberOfConnectors', {
+                    key: 'NumberOfConnectors',
+                    readonly: true,
+                    value: String(numberOfConnectors),
+                });
+                this.saveConfiguration();
+            }
+        }
     }
 
     /**

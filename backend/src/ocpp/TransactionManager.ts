@@ -16,6 +16,9 @@ import { MeterValueStorage } from './MeterValueStorage';
 import { TransactionTracker } from './TransactionTracker';
 import { TransactionHistory } from './TransactionHistory';
 import { AuthorizationManager } from './AuthorizationManager';
+import { logger } from '../utils/logger';
+
+const COMPONENT = 'TransactionManager';
 
 export class TransactionManager extends EventEmitter {
     private chargePoint: ChargePoint;
@@ -70,52 +73,63 @@ export class TransactionManager extends EventEmitter {
     }
 
     public async startTransaction(connectorId: number, idTag: string, isRemoteStart: boolean = false): Promise<ChargingSession> {
-        // Check if connected to OCPP server - CRITICAL: No offline charging allowed
+        logger.info(COMPONENT, 'start_transaction.requested', { connector_id: connectorId, id_tag: idTag, remote: isRemoteStart });
+
         if (!this.chargePoint.isConnectedToServer()) {
+            logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'not_connected' });
             throw new Error('Cannot start charging: Not connected to OCPP server. Please connect first.');
         }
 
-        // Check if connector is available
         const status = this.chargePoint.getConnectorStatus(connectorId);
         if (status !== ConnectorStatus.Available) {
+            logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'connector_not_available', connector_status: status });
             throw new Error(`Connector ${connectorId} is not available (status: ${status})`);
         }
 
-        // Check if session already exists
         if (this.sessions.has(connectorId)) {
+            logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'session_already_active' });
             throw new Error(`Connector ${connectorId} already has an active session`);
         }
 
-        // CRITICAL: Authorize ID tag using AuthorizationManager
-        console.log(`[TransactionManager] Authorizing ID tag: ${idTag}`);
-        const idTagInfo = await this.authorizationManager.authorize(idTag);
+        // OCPP 1.6 §5.11: For a RemoteStartTransaction, the charge point
+        // re-authorizes via Authorize.req only when AuthorizeRemoteTxRequests
+        // is true (default false). The CSMS already vetted the idTag before
+        // sending RemoteStart — re-authorizing produces an extra round trip
+        // that fails on backends that don't expose /authorize, deadlocking
+        // the start flow. Local starts (button on the charger) always go
+        // through the full multi-tier auth — cache → local list → CSMS.
+        const authorizeRemote = this.configManager.getValueAsBoolean('AuthorizeRemoteTxRequests', false);
+        const shouldAuthorize = !isRemoteStart || authorizeRemote;
 
-        if (idTagInfo.status !== 'Accepted') {
-            throw new Error(`Authorization failed: ${idTagInfo.status}`);
+        if (shouldAuthorize) {
+            logger.info(COMPONENT, 'authorize.start', { id_tag: idTag, remote: isRemoteStart });
+            const idTagInfo = await this.authorizationManager.authorize(idTag);
+
+            if (idTagInfo.status !== 'Accepted') {
+                logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'authorize_failed', authorize_status: idTagInfo.status });
+                throw new Error(`Authorization failed: ${idTagInfo.status}`);
+            }
+
+            if (idTagInfo.expiryDate && new Date(idTagInfo.expiryDate) < new Date()) {
+                logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'tag_expired', expiry_date: idTagInfo.expiryDate });
+                throw new Error(`ID tag ${idTag} has expired`);
+            }
+
+            logger.info(COMPONENT, 'authorize.accepted', { id_tag: idTag });
+        } else {
+            logger.info(COMPONENT, 'authorize.skipped', { id_tag: idTag, reason: 'remote_start_with_authorize_remote_false' });
         }
 
-        // Check for concurrent transaction
         if (this.authorizationManager.hasConcurrentTransaction(idTag)) {
+            logger.error(COMPONENT, 'start_transaction.rejected', { connector_id: connectorId, id_tag: idTag, reason: 'concurrent_transaction' });
             throw new Error(`ID tag ${idTag} already has an active transaction`);
         }
 
-        // Check tag expiry
-        if (idTagInfo.expiryDate && new Date(idTagInfo.expiryDate) < new Date()) {
-            throw new Error(`ID tag ${idTag} has expired`);
-        }
-
-        console.log(`[TransactionManager] ID tag ${idTag} authorized successfully`);
-
-        // Update status to Preparing
         await this.chargePoint.sendStatusNotification(connectorId, ConnectorStatus.Preparing);
 
-        // Generate unique local transaction ID immediately
         const localTransactionId = this.generateUniqueTransactionId();
-        console.log(`[TransactionManager] Generated unique transaction ID: ${localTransactionId}`);
-
-        // Get current meter value from persistent storage
         const startMeterValue = this.meterStorage.getMeterValue(connectorId);
-        console.log(`[TransactionManager] Starting meter value for connector ${connectorId}: ${startMeterValue} Wh`);
+        logger.debug(COMPONENT, 'start_transaction.prepared', { connector_id: connectorId, local_tx_id: localTransactionId, start_meter_wh: startMeterValue });
 
         // Create session with local transaction ID and persistent meter value
         const session: ChargingSession = {
@@ -140,24 +154,21 @@ export class TransactionManager extends EventEmitter {
         let lastError: Error | null = null;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                console.log(`[TransactionManager] Sending StartTransaction (attempt ${attempt}/${maxAttempts})`);
+                logger.info(COMPONENT, 'start_transaction.send', { connector_id: connectorId, attempt, max_attempts: maxAttempts });
 
                 const response = await this.chargePoint.sendStartTransaction(connectorId, idTag, startMeterValue);
 
                 if (response.idTagInfo.status !== 'Accepted') {
+                    logger.error(COMPONENT, 'start_transaction.csms_rejected', { connector_id: connectorId, id_tag: idTag, csms_status: response.idTagInfo.status });
                     throw new Error(`Transaction start rejected: ${response.idTagInfo.status}`);
                 }
 
-                // Handle transaction ID based on start type
                 if (isRemoteStart) {
-                    // For remote starts: use server-assigned transaction ID
                     session.transactionId = response.transactionId;
-                    console.log(`[TransactionManager] Remote start - using server transaction ID: ${response.transactionId}`);
                 } else {
-                    // For local starts: keep our local unique ID
-                    console.log(`[TransactionManager] Local start - server assigned ID: ${response.transactionId}, using local ID: ${localTransactionId}`);
-                    // session.transactionId already set to localTransactionId, don't change it
+                    // Local start: keep our local unique ID, ignore server's
                 }
+                logger.info(COMPONENT, 'start_transaction.accepted', { connector_id: connectorId, transaction_id: session.transactionId, server_tx_id: response.transactionId, remote: isRemoteStart });
 
                 // CRITICAL: Register transaction in tracker to ensure it gets stopped
                 this.transactionTracker.registerTransaction(
@@ -201,16 +212,15 @@ export class TransactionManager extends EventEmitter {
 
             } catch (error) {
                 lastError = error as Error;
-                console.error(`[TransactionManager] StartTransaction attempt ${attempt}/${maxAttempts} failed:`, error);
+                logger.error(COMPONENT, 'start_transaction.attempt_failed', { connector_id: connectorId, attempt, max_attempts: maxAttempts, error: (error as Error).message });
 
                 if (attempt < maxAttempts) {
-                    console.log(`[TransactionManager] Retrying in ${retryInterval} seconds...`);
                     await new Promise(resolve => setTimeout(resolve, retryInterval * 1000));
                 }
             }
         }
 
-        // All attempts failed
+        logger.error(COMPONENT, 'start_transaction.all_attempts_failed', { connector_id: connectorId, id_tag: idTag, attempts: maxAttempts, error: lastError?.message });
         this.sessions.delete(connectorId);
         await this.chargePoint.sendStatusNotification(connectorId, ConnectorStatus.Available);
         throw lastError || new Error('StartTransaction failed after all retry attempts');
@@ -349,11 +359,14 @@ export class TransactionManager extends EventEmitter {
             elapsedSeconds++;
             session.duration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
 
+            // Random power between 14 and 22 kW
+            const randomPower = 14 + Math.random() * (22 - 14);
+
             // Power ramp-up simulation
             if (elapsedSeconds <= rampUpDuration) {
-                session.powerKw = (this.maxPowerKw / rampUpDuration) * elapsedSeconds;
+                session.powerKw = (randomPower / rampUpDuration) * elapsedSeconds;
             } else {
-                session.powerKw = this.maxPowerKw;
+                session.powerKw = randomPower;
             }
 
             // Calculate energy (kWh = kW * hours)
@@ -434,7 +447,7 @@ export class TransactionManager extends EventEmitter {
         // Add each configured measurand
         if (measurands.includes('Energy.Active.Import.Register')) {
             sampledValue.push({
-                value: currentMeterValue.toString(),
+                value: Math.round(currentMeterValue).toString(),
                 context,
                 measurand: Measurand.EnergyActiveImportRegister,
                 unit: UnitOfMeasure.Wh
@@ -442,14 +455,13 @@ export class TransactionManager extends EventEmitter {
         }
 
         if (measurands.includes('Power.Active.Import')) {
-            // Get current power from configuration or use session power
             const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
-            const voltage = 400; // 3-phase voltage
+            const voltage = 400;
             const maxPowerKw = (currentLimitA * voltage * Math.sqrt(3)) / 1000;
             const actualPower = Math.min(session.powerKw, maxPowerKw);
 
             sampledValue.push({
-                value: (actualPower * 1000).toString(), // Convert to W
+                value: Math.round(actualPower * 1000).toString(),
                 context,
                 measurand: Measurand.PowerActiveImport,
                 unit: UnitOfMeasure.W

@@ -4,6 +4,9 @@ import { EventEmitter } from 'events';
 import { ChargePointConfiguration, ConnectorStatus, OCPPConfiguration } from '../models/Configuration';
 import { ConfigurationManager } from './ConfigurationManager';
 import { AuthorizationManager } from './AuthorizationManager';
+import { logger } from '../utils/logger';
+
+const COMPONENT = 'ChargePoint';
 
 export enum OCPPMessageType {
     CALL = 2,
@@ -34,7 +37,7 @@ export class ChargePoint extends EventEmitter {
     constructor(config: ChargePointConfiguration) {
         super();
         this.config = config;
-        this.configManager = new ConfigurationManager(config.chargePointId);
+        this.configManager = new ConfigurationManager(config.chargePointId, config.numberOfConnectors);
 
         // Initialize connector status
         for (let i = 1; i <= config.numberOfConnectors; i++) {
@@ -64,11 +67,22 @@ export class ChargePoint extends EventEmitter {
                 this.ws.on('open', async () => {
                     this.isConnected = true;
                     this.emit('connected');
-                    console.log(`[ChargePoint] Connected to ${url}`);
+                    logger.info(COMPONENT, 'ws.connected', { url });
 
                     // Send BootNotification
                     try {
                         await this.sendBootNotification();
+
+                        // After boot, kick off status notifications for all
+                        // connectors. Fire-and-forget on purpose — a single
+                        // CALLERROR or per-message timeout from the CSMS
+                        // must not block the heartbeat loop, otherwise the
+                        // CSMS marks us offline and the connection looks
+                        // healthy from our side but silent from theirs.
+                        // Per-connector failures are logged inside the
+                        // helper.
+                        void this.sendConnectorStatusNotifications();
+
                         this.startHeartbeat();
                         resolve();
                     } catch (error) {
@@ -80,16 +94,16 @@ export class ChargePoint extends EventEmitter {
                     this.handleMessage(data.toString());
                 });
 
-                this.ws.on('close', () => {
+                this.ws.on('close', (code, reason) => {
                     this.isConnected = false;
                     this.emit('disconnected');
-                    console.log('[ChargePoint] Disconnected from server');
+                    logger.warn(COMPONENT, 'ws.disconnected', { close_code: code, close_reason: reason?.toString() });
                     this.stopHeartbeat();
                     this.scheduleReconnect();
                 });
 
                 this.ws.on('error', (error) => {
-                    console.error('[ChargePoint] WebSocket error:', error);
+                    logger.error(COMPONENT, 'ws.error', { error: error.message });
                     this.emit('error', error);
                     reject(error);
                 });
@@ -117,10 +131,10 @@ export class ChargePoint extends EventEmitter {
         if (this.reconnectTimeout) return;
 
         this.reconnectTimeout = setTimeout(() => {
-            console.log('[ChargePoint] Attempting to reconnect...');
+            logger.info(COMPONENT, 'ws.reconnect_attempt');
             this.reconnectTimeout = null;
             this.connect().catch(err => {
-                console.error('[ChargePoint] Reconnect failed:', err);
+                logger.error(COMPONENT, 'ws.reconnect_failed', { error: err.message });
             });
         }, 5000);
     }
@@ -134,28 +148,27 @@ export class ChargePoint extends EventEmitter {
             const uniqueId = message[1] as string;
 
             if (messageTypeId === OCPPMessageType.CALL) {
-                // Incoming request from Central System
                 const action = message[2] as string;
                 const payload = message[3];
+                logger.info(COMPONENT, 'ocpp.recv.call', { message_id: uniqueId, action, payload });
                 this.handleRequest(uniqueId, action, payload);
             } else if (messageTypeId === OCPPMessageType.CALLRESULT) {
-                // Response to our request
                 const payload = message[2];
+                logger.debug(COMPONENT, 'ocpp.recv.result', { message_id: uniqueId, payload });
                 this.handleResponse(uniqueId, payload);
             } else if (messageTypeId === OCPPMessageType.CALLERROR) {
-                // Error response
                 const errorCode = message[2];
                 const errorDescription = message[3];
                 const errorDetails = message[4];
+                logger.error(COMPONENT, 'ocpp.recv.error', { message_id: uniqueId, error_code: errorCode, error_description: errorDescription, error_details: errorDetails });
                 this.handleError(uniqueId, errorCode, errorDescription, errorDetails);
             }
         } catch (error) {
-            console.error('[ChargePoint] Error parsing message:', error);
+            logger.error(COMPONENT, 'ocpp.parse_error', { error: (error as Error).message, raw: data.slice(0, 500) });
         }
     }
 
     private async handleRequest(uniqueId: string, action: string, payload: any): Promise<void> {
-        console.log(`[ChargePoint] Received ${action} request:`, payload);
 
         let response: any;
 
@@ -234,7 +247,7 @@ export class ChargePoint extends EventEmitter {
             const messageStr = JSON.stringify(message);
             this.ws.send(messageStr);
             this.emit('message', { direction: 'outgoing', data: message });
-            console.log(`[ChargePoint] Sent ${action}:`, payload);
+            logger.info(COMPONENT, 'ocpp.send.call', { message_id: uniqueId, action, payload });
         });
     }
 
@@ -281,6 +294,28 @@ export class ChargePoint extends EventEmitter {
         return response;
     }
 
+    /**
+     * Send status notifications for all connectors after boot
+     * This ensures the server knows the current state of all connectors
+     */
+    private async sendConnectorStatusNotifications(): Promise<void> {
+        console.log('[ChargePoint] Sending status notifications for all connectors after boot');
+
+        // Emit event to check for orphaned transactions
+        this.emit('bootCompleted');
+
+        // Send status notification for each connector
+        for (let connectorId = 1; connectorId <= this.config.numberOfConnectors; connectorId++) {
+            const status = this.connectorStatus.get(connectorId) || ConnectorStatus.Available;
+            try {
+                await this.sendStatusNotification(connectorId, status);
+                console.log(`[ChargePoint] Sent status notification for connector ${connectorId}: ${status}`);
+            } catch (error) {
+                console.error(`[ChargePoint] Failed to send status notification for connector ${connectorId}:`, error);
+            }
+        }
+    }
+
     public async sendHeartbeat(): Promise<any> {
         return this.sendCall('Heartbeat', {});
     }
@@ -303,10 +338,14 @@ export class ChargePoint extends EventEmitter {
     }
 
     public async sendStartTransaction(connectorId: number, idTag: string, meterStart: number): Promise<any> {
+        // OCPP 1.6 §6.51: meterStart is `integer` Wh on the wire. Internal
+        // storage keeps fractional Wh (1-second power*time accumulators)
+        // for precision; we coerce at this boundary so the CSMS gets a
+        // schema-valid payload instead of a TypeConstraintViolation.
         const payload = {
             connectorId,
             idTag,
-            meterStart,
+            meterStart: Math.round(meterStart),
             timestamp: new Date().toISOString()
         };
 
@@ -314,9 +353,11 @@ export class ChargePoint extends EventEmitter {
     }
 
     public async sendStopTransaction(transactionId: number, meterStop: number, idTag: string, reason: string = 'Local'): Promise<any> {
+        // OCPP 1.6 §6.55: meterStop is `integer` Wh on the wire. Same
+        // float-to-int coercion as sendStartTransaction — see comment there.
         const payload = {
             transactionId,
-            meterStop,
+            meterStop: Math.round(meterStop),
             timestamp: new Date().toISOString(),
             idTag,
             reason
@@ -360,15 +401,18 @@ export class ChargePoint extends EventEmitter {
             const connectorId = payload.connectorId || 1;
             const idTag = payload.idTag;
 
-            console.log(`[ChargePoint] Remote start transaction requested for connector ${connectorId}, idTag: ${idTag}`);
+            logger.info(COMPONENT, 'remote_start.received', { connector_id: connectorId, id_tag: idTag });
 
-            // Emit event for transaction manager to handle
-            // Pass isRemoteStart=true to use server transaction ID
+            // Per OCPP 1.6 §5.11 the charge point's CALLRESULT only confirms
+            // that the request shape was understood, not that the transaction
+            // started. The actual StartTransaction CALL is fired async from
+            // TransactionManager — failure paths there log distinct events
+            // (start_transaction.attempt_failed, etc.).
             this.emit('remoteStartTransaction', { connectorId, idTag, isRemoteStart: true });
 
             return { status: 'Accepted' };
         } catch (error) {
-            console.error('[ChargePoint] Error handling remote start transaction:', error);
+            logger.error(COMPONENT, 'remote_start.handler_error', { error: (error as Error).message });
             return { status: 'Rejected' };
         }
     }
@@ -479,6 +523,10 @@ export class ChargePoint extends EventEmitter {
 
     public getConnectorStatus(connectorId: number): ConnectorStatus {
         return this.connectorStatus.get(connectorId) || ConnectorStatus.Available;
+    }
+
+    public getNumberOfConnectors(): number {
+        return this.config.numberOfConnectors;
     }
 
     public isConnectedToServer(): boolean {

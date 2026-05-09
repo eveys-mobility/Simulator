@@ -7,11 +7,22 @@ export interface OCPPLogMessage {
     data: any;
 }
 
+export interface TraceEntry {
+    ts: string;
+    level: 'debug' | 'info' | 'warn' | 'error';
+    component: string;
+    event: string;
+    cp_id?: string;
+    [key: string]: any;
+}
+
 export class WebSocketServer {
     private wss: WebSocket.Server;
     private clients: Set<WebSocket> = new Set();
     private messageLog: OCPPLogMessage[] = [];
+    private traceLog: TraceEntry[] = [];
     private maxLogSize: number = 1000;
+    private maxTraceSize: number = 2000;
 
     constructor(server: HTTPServer) {
         this.wss = new WebSocket.Server({ server, path: '/ws' });
@@ -24,6 +35,13 @@ export class WebSocketServer {
             ws.send(JSON.stringify({
                 type: 'logs',
                 data: this.messageLog
+            }));
+
+            // Replay the trace buffer so a freshly-opened UI lands on
+            // the latest events instead of waiting for the next one.
+            ws.send(JSON.stringify({
+                type: 'traces',
+                data: this.traceLog
             }));
 
             ws.on('close', () => {
@@ -73,6 +91,21 @@ export class WebSocketServer {
             event,
             data
         });
+    }
+
+    public broadcastTrace(entry: TraceEntry): void {
+        this.traceLog.push(entry);
+        if (this.traceLog.length > this.maxTraceSize) {
+            this.traceLog = this.traceLog.slice(-this.maxTraceSize);
+        }
+        this.broadcast({
+            type: 'trace',
+            data: entry
+        });
+    }
+
+    public getTraceLog(): TraceEntry[] {
+        return [...this.traceLog];
     }
 
     private broadcast(message: any): void {
