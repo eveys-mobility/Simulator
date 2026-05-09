@@ -9,10 +9,15 @@ export interface ChargingSession {
     powerKw: number;
     energyKwh: number;
     duration: number; // seconds
-    /** Latest per-phase frame from PhaseModel. Stamped onto the
-     *  session whenever sendMeterValues runs so the websocket
-     *  `sessionUpdated` push carries the breakdown for the UI. */
+    /** Latest per-phase frame from PhaseModel. AC connectors only —
+     *  DC sessions populate `dcFrame` instead. Stamped each tick so
+     *  the websocket `sessionUpdated` push carries it for the UI. */
     phaseFrame?: import('../ocpp/PhaseModel').PhaseFrame;
+    /** Latest DC frame from DCModel. DC connectors only. */
+    dcFrame?: import('../ocpp/DCModel').DCFrame;
+    /** Live state-of-charge (DC connectors only). Mirror of
+     *  dcFrame.soc_pct kept on the session root for convenience. */
+    socPercent?: number;
 }
 
 export enum SessionStatus {

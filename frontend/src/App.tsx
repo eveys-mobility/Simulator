@@ -274,6 +274,7 @@ function App() {
                                             connectorId={connector.id}
                                             hasActiveSession={!!sess}
                                             sessionStatus={sess?.status ?? null}
+                                            connectorType={connector.connectorType}
                                             phaseMode={connector.phaseMode}
                                             onAction={showNotification}
                                         />

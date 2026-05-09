@@ -7,7 +7,7 @@
         "dev": "tsx watch src/server.ts",
         "build": "tsc",
         "start": "node dist/server.js",
-        "test": "tsx --test src/ocpp/PhaseModel.test.ts"
+        "test": "tsx --test src/ocpp/PhaseModel.test.ts src/ocpp/DCModel.test.ts"
     },
     "keywords": [
         "ocpp",

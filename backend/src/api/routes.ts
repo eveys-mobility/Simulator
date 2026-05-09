@@ -20,7 +20,11 @@ export function createApiRoutes(
                 id,
                 status: chargePoint.getConnectorStatus(id),
                 hasActiveSession: transactionManager.hasActiveSession(id),
+                connectorType: transactionManager.getConnectorType(id),
                 phaseMode: transactionManager.getPhaseMode(id),
+                dcProfile: transactionManager.getConnectorType(id) === 'DC'
+                    ? transactionManager.getDCProfile(id)
+                    : undefined,
             });
         }
 
@@ -37,6 +41,8 @@ export function createApiRoutes(
                 duration: session.duration,
                 startTime: session.startTime,
                 phaseFrame: transactionManager.getLastPhaseFrame(session.connectorId),
+                dcFrame: transactionManager.getLastDCFrame(session.connectorId),
+                socPercent: session.socPercent,
             })),
             connectors,
         });
@@ -64,6 +70,64 @@ export function createApiRoutes(
         }
         const result = transactionManager.setPhaseMode(id, raw);
         return res.json({ success: true, connectorId: id, mode: result.mode, warned: result.warned });
+    });
+
+    // Per-connector type (AC/DC). Switching to DC unlocks the DC
+    // metering shape (single-row Voltage/Current/Power, mandatory
+    // SoC) and the BMS-taper charging curve.
+    router.get('/connectors/:id/type', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        return res.json({
+            success: true,
+            connectorId: id,
+            type: transactionManager.getConnectorType(id),
+            dcProfile: transactionManager.getConnectorType(id) === 'DC'
+                ? transactionManager.getDCProfile(id)
+                : undefined,
+        });
+    });
+
+    router.post('/connectors/:id/type', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        const raw = req.body?.type;
+        if (typeof raw !== 'string') {
+            return res.status(400).json({ success: false, message: 'body.type (string) is required' });
+        }
+        const result = transactionManager.setConnectorType(id, raw);
+        return res.json({ success: true, connectorId: id, type: result.type });
+    });
+
+    // DC battery profile — capacity, charger rating, target SoC,
+    // ramp-up duration. Body fields are merged onto the existing
+    // profile; missing fields are left untouched.
+    router.get('/connectors/:id/dc-profile', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        return res.json({ success: true, connectorId: id, profile: transactionManager.getDCProfile(id) });
+    });
+
+    router.post('/connectors/:id/dc-profile', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        const partial: any = {};
+        for (const k of ['capacity_kwh', 'charger_max_kw', 'nominal_voltage_v', 'initial_soc_pct', 'target_soc_pct', 'ramp_up_seconds']) {
+            const v = req.body?.[k];
+            if (typeof v === 'number' && Number.isFinite(v)) {
+                partial[k] = v;
+            }
+        }
+        const merged = transactionManager.setDCProfile(id, partial);
+        return res.json({ success: true, connectorId: id, profile: merged });
     });
 
     // Get transaction history
