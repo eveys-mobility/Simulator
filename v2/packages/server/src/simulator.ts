@@ -234,10 +234,16 @@ export class Simulator extends EventEmitter {
         ocppSessionDurationSeconds.observe({ device_type: this.device.type, end_reason: reason }, durationSec);
         ocppSessionEnergyWh.observe({ device_type: this.device.type }, energyWh);
         await this.setStatus(connectorId, 'Finishing');
-        try {
-            await this.client.stopTransaction({ transactionId: tx, meterStop: energyWh, reason, idTag: c.idTag ?? undefined });
-        } catch (err) {
-            this.emit('error', err);
+        // Skip the StopTransaction CALL when offline — the CSMS isn't
+        // there to receive it, and a long-pending CALL would block the
+        // delete path. The session row still gets ended via the
+        // 'session: stopped' event so audit history stays correct.
+        if (this.client.isOnline()) {
+            try {
+                await this.client.stopTransaction({ transactionId: tx, meterStop: energyWh, reason, idTag: c.idTag ?? undefined });
+            } catch (err) {
+                this.emit('error', err);
+            }
         }
         c.transactionId = null;
         c.sessionRowId = null;
