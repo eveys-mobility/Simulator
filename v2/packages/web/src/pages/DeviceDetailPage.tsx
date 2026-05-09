@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { LiveDot } from '@/components/LiveDot';
 import { ManualControls } from '@/components/ManualControls';
 import { TraceViewer } from '@/components/TraceViewer';
 import { api } from '@/lib/api';
@@ -58,7 +59,10 @@ export function DeviceDetailPage() {
                     <div className="flex items-center gap-2">
                         <Badge variant={device.type === 'DC' ? 'dc' : 'ac'}>{device.type}</Badge>
                         <h1 className="text-2xl font-semibold">{device.displayName}</h1>
-                        <Badge variant={online ? 'online' : 'offline'}>{online ? 'Online' : 'Offline'}</Badge>
+                        <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
+                            <LiveDot pulse={online} tone={online ? 'green' : 'gray'} />
+                            {online ? 'Online' : 'Offline'}
+                        </Badge>
                     </div>
                     <p className="font-mono text-xs text-muted-foreground">{device.id}</p>
                 </div>
@@ -95,7 +99,13 @@ export function DeviceDetailPage() {
                             <Card key={c.id}>
                                 <CardHeader className="flex-row items-center justify-between space-y-0">
                                     <CardTitle className="text-base">Connector {c.id}</CardTitle>
-                                    <Badge variant={charging ? 'online' : status === 'Faulted' ? 'destructive' : 'outline'}>{status}</Badge>
+                                    <Badge
+                                        variant={charging ? 'online' : status === 'Faulted' ? 'destructive' : 'outline'}
+                                        className="gap-1.5"
+                                    >
+                                        {charging && <LiveDot pulse tone="green" />}
+                                        {status}
+                                    </Badge>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="grid grid-cols-3 gap-2 text-sm">

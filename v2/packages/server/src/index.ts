@@ -22,6 +22,32 @@ const initialOcppUrl = persistedUrl ?? OCPP_URL_ENV;
 
 const manager = new DeviceManager(store);
 
+// Persist session-end events. Sessions get marked `active` at start
+// and `completed`/`aborted` only when something — manual stop endpoint,
+// emergency stop, plug-out, hard reset, fault injection — actually
+// ends them. The Simulator emits `session: stopped` for all of those;
+// the API-route stop endpoints used to be the only writers, leaving
+// rows stuck on `active` whenever the stop came from anywhere else.
+manager.on(
+    'session',
+    (e: {
+        type: 'started' | 'stopped';
+        sessionRowId: number;
+        energyWh?: number;
+        peakPowerKw?: number;
+        reason?: string;
+    }) => {
+        if (e.type !== 'stopped') return;
+        store.endSession({
+            id: e.sessionRowId,
+            endedAt: new Date().toISOString(),
+            endReason: e.reason ?? 'Local',
+            energyWh: e.energyWh ?? 0,
+            peakPowerKw: e.peakPowerKw ?? 0,
+        });
+    },
+);
+
 // Re-spawn every device persisted in the DB at boot.
 for (const d of store.listDevices()) {
     manager.spawn(d).catch((err) => console.error(`[server] failed to spawn ${d.id}:`, err));

@@ -281,14 +281,10 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         const sim = manager.get(req.params.id);
         if (!sim) return reply.code(404).send({ error: 'device not found' });
         try {
+            // The session-row update is handled by the manager's
+            // 'session: stopped' listener in index.ts, regardless of
+            // who initiated the stop (manual, remote, fault, e-stop).
             const result = await sim.stopSession(body.data.connectorId, body.data.reason);
-            store.endSession({
-                id: result.sessionRowId,
-                endedAt: new Date().toISOString(),
-                endReason: body.data.reason,
-                energyWh: result.energyWh,
-                peakPowerKw: result.peakPowerKw,
-            });
             return { ok: true, ...result };
         } catch (err) {
             return reply.code(500).send({ error: (err as Error).message });
@@ -518,6 +514,18 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         return { stopped: sims.length };
     });
 
+    /**
+     * Stop every active session across the fleet without faulting the
+     * connectors. Returns the number of sessions actually ended.
+     * Distinct from /emergency-stop — this is the "graceful end" button.
+     */
+    app.post('/api/fleet/stop-all', async () => {
+        const sims = manager.list();
+        const counts = await Promise.all(sims.map((sim) => sim.stopAllSessions().catch(() => 0)));
+        const sessions = counts.reduce((s, n) => s + n, 0);
+        return { devices: sims.length, sessionsStopped: sessions };
+    });
+
     /** Cheap rollup for the Fleet Ops dashboard header. */
     app.get('/api/fleet/summary', async () => {
         let total = 0;
@@ -543,12 +551,27 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
     });
 
     app.get('/api/sessions', async (req) => {
-        const q = req.query as { status?: 'active' | 'completed' | 'aborted'; deviceId?: string; limit?: string };
-        return store.listSessions({
+        const q = req.query as {
+            status?: 'active' | 'completed' | 'aborted';
+            deviceId?: string;
+            idTag?: string;
+            since?: string;
+            until?: string;
+            limit?: string;
+            offset?: string;
+        };
+        const limit = Math.min(200, Math.max(1, q.limit ? Number(q.limit) : 50));
+        const offset = Math.max(0, q.offset ? Number(q.offset) : 0);
+        const filter = {
             status: q.status,
             deviceId: q.deviceId,
-            limit: q.limit ? Number(q.limit) : undefined,
-        });
+            idTag: q.idTag,
+            since: q.since,
+            until: q.until,
+        };
+        const sessions = store.listSessions({ ...filter, limit, offset });
+        const total = store.countSessions(filter);
+        return { sessions, total, limit, offset };
     });
 
     // ---- WEBSOCKET PUBSUB ----
@@ -612,6 +635,28 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         currentDefaultOcppUrl = body.data.defaultOcppUrl;
         store.setSetting('default_ocpp_url', currentDefaultOcppUrl);
         return { defaultOcppUrl: currentDefaultOcppUrl };
+    });
+
+    /**
+     * Wipe the simulator: tear down every Simulator, truncate every
+     * SQLite table, and zero in-process state. The body must include
+     * `confirm: 'DELETE'` so this endpoint can't fire by accident.
+     * Returns 200 with `{ ok, devices: 0 }` on success.
+     */
+    const ResetBody = z.object({ confirm: z.literal('DELETE') });
+
+    app.post('/api/settings/reset', async (req, reply) => {
+        const body = ResetBody.safeParse(req.body);
+        if (!body.success) {
+            return reply.code(400).send({
+                error: 'reset requires `confirm: "DELETE"` in the body',
+            });
+        }
+        await manager.stopAll();
+        store.reset();
+        // Fan a synthetic 'state' so any open WS clients refetch their device lists.
+        manager.emit('state', { deviceId: '__reset__', online: false });
+        return { ok: true, devices: 0 };
     });
 
     return app;
