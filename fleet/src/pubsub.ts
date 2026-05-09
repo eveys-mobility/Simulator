@@ -8,20 +8,45 @@
  *   session_ended    — mirrors the worker UpMessage
  *   meter_summary    — group rollup at 1 Hz (total_kw, active_sessions)
  *
- * Per-CP `meter_tick` is intentionally NOT broadcast here: 100 CPs ×
- * 1 Hz × 100 watchers = 10k frames/s and the fleet dashboard doesn't
- * need that fidelity. The single-CP UI keeps the per-CP detail.
+ * Plus per-CP subscriptions: a client sends `{type:'subscribe',cp_id}`
+ * and starts receiving `meter_tick` + (per-CP-tagged) `cp_state`,
+ * `session_started`, `session_ended` for that cp_id only. This is
+ * what the deep-linked single-CP UI uses — see frontend
+ * services/api.ts. Without an explicit subscribe the client gets
+ * only the broadcast channels above (the fleet dashboard's needs).
+ *
+ * Per-CP `meter_tick` is deliberately scoped to subscribers:
+ * 100 CPs × 1 Hz × 100 fleet-dashboard tabs = 10 k frames/s, and
+ * the dashboard doesn't need that fidelity. Single-CP detail tabs
+ * subscribe to one cp_id and get exactly what they need.
  */
 
-import { WebSocket, WebSocketServer } from 'ws';
+import WS, { WebSocket, WebSocketServer } from 'ws';
 import { Server as HTTPServer } from 'http';
 import { Registry } from './registry';
 import { FleetStore } from './sqlite';
 import { UpMessage } from './protocol';
 
 interface FleetMessage {
-    type: 'cp_state' | 'session_started' | 'session_ended' | 'meter_summary' | 'hello';
+    type:
+        | 'cp_state'
+        | 'session_started'
+        | 'session_ended'
+        | 'meter_summary'
+        | 'meter_tick'
+        | 'hello';
     [key: string]: unknown;
+}
+
+interface ClientCommand {
+    type: 'subscribe' | 'unsubscribe';
+    cp_id?: string;
+}
+
+function isClientCommand(value: unknown): value is ClientCommand {
+    if (typeof value !== 'object' || value === null) return false;
+    const t = (value as { type?: unknown }).type;
+    return t === 'subscribe' || t === 'unsubscribe';
 }
 
 const SUMMARY_INTERVAL_MS = 1000;
@@ -29,6 +54,12 @@ const SUMMARY_INTERVAL_MS = 1000;
 export class FleetPubSub {
     private wss: WebSocketServer;
     private clients: Set<WebSocket> = new Set();
+    /** Per-client subscription set: cp_ids the client wants per-CP
+     *  events for. Lookups happen on every relayUp call, so this
+     *  is a hot map — keep it on the WebSocket instance via a
+     *  WeakMap-style attached field. We use a parallel Map here so
+     *  TypeScript doesn't have to widen the WebSocket type. */
+    private subscriptions: Map<WebSocket, Set<string>> = new Map();
     private summaryTimer: NodeJS.Timeout | null = null;
 
     constructor(args: { server: HTTPServer; registry: Registry; store: FleetStore }) {
@@ -37,6 +68,7 @@ export class FleetPubSub {
 
         this.wss.on('connection', (ws) => {
             this.clients.add(ws);
+            this.subscriptions.set(ws, new Set());
             // Initial snapshot so a freshly opened tab doesn't have to
             // wait for the next 1 Hz tick to render anything.
             this.send(ws, {
@@ -44,8 +76,15 @@ export class FleetPubSub {
                 cps: registry.list(),
                 groups: store.listGroups(),
             });
-            ws.on('close', () => this.clients.delete(ws));
-            ws.on('error', () => this.clients.delete(ws));
+            ws.on('message', (raw) => this.handleClientMessage(ws, raw));
+            ws.on('close', () => {
+                this.clients.delete(ws);
+                this.subscriptions.delete(ws);
+            });
+            ws.on('error', () => {
+                this.clients.delete(ws);
+                this.subscriptions.delete(ws);
+            });
         });
 
         this.summaryTimer = setInterval(() => {
@@ -53,17 +92,15 @@ export class FleetPubSub {
         }, SUMMARY_INTERVAL_MS);
     }
 
-    /** Adapter: turns worker UpMessages into broadcast events. */
+    /** Adapter: turns worker UpMessages into broadcast / unicast
+     *  events depending on type and per-CP subscriptions. */
     relayUp(cp_id: string, msg: UpMessage): void {
         switch (msg.type) {
             case 'connected':
             case 'disconnected':
             case 'connector_status': {
-                // Strip the inner UpMessage's `type` discriminator
-                // before spreading — the broadcast envelope wants
-                // `type: 'cp_state'`, with the original kind kept as
-                // `event` so consumers can branch on the action.
                 const { type, ...rest } = msg;
+                // Fleet-wide broadcast for the dashboard…
                 this.broadcast({ type: 'cp_state', cp_id, event: type, ...rest });
                 break;
             }
@@ -77,8 +114,16 @@ export class FleetPubSub {
                 this.broadcast({ type: 'session_ended', cp_id, ...rest });
                 break;
             }
-            // meter_tick / ready / error: not surfaced to UI consumers
-            // at this layer; supervisor logs errors directly.
+            case 'meter_tick': {
+                // Per-CP subscribers only. Single-CP detail tabs
+                // subscribe to one cp_id; the fleet dashboard does
+                // not subscribe and so doesn't see this stream.
+                const { type, ...rest } = msg;
+                this.unicastToSubscribers(cp_id, { type: 'meter_tick', cp_id, ...rest });
+                break;
+            }
+            // ready / error / pong: not surfaced to UI consumers at
+            // this layer; supervisor logs errors directly.
         }
     }
 
@@ -91,7 +136,24 @@ export class FleetPubSub {
             try { c.close(); } catch { /* shutting down */ }
         }
         this.clients.clear();
+        this.subscriptions.clear();
         this.wss.close();
+    }
+
+    private handleClientMessage(ws: WebSocket, raw: WS.Data): void {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(raw.toString());
+        } catch {
+            return; // ignore malformed
+        }
+        if (!isClientCommand(parsed)) return;
+        const cmd = parsed;
+        if (typeof cmd.cp_id !== 'string' || cmd.cp_id.length === 0) return;
+        const subs = this.subscriptions.get(ws);
+        if (!subs) return;
+        if (cmd.type === 'subscribe') subs.add(cmd.cp_id);
+        else subs.delete(cmd.cp_id);
     }
 
     private send(ws: WebSocket, msg: FleetMessage): void {
@@ -102,6 +164,20 @@ export class FleetPubSub {
     private broadcast(msg: FleetMessage): void {
         const wire = JSON.stringify(msg);
         for (const ws of this.clients) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(wire);
+        }
+    }
+
+    /**
+     * Send a message only to clients subscribed to this cp_id.
+     * Used for high-cardinality streams (meter_tick) that a fleet
+     * dashboard doesn't want but a single-CP detail tab does.
+     */
+    private unicastToSubscribers(cp_id: string, msg: FleetMessage): void {
+        const wire = JSON.stringify(msg);
+        for (const ws of this.clients) {
+            const subs = this.subscriptions.get(ws);
+            if (!subs || !subs.has(cp_id)) continue;
             if (ws.readyState === WebSocket.OPEN) ws.send(wire);
         }
     }

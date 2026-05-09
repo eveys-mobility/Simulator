@@ -262,9 +262,8 @@ function App() {
                 <>
                 {deepLinkedCp && (
                     <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-                        <strong>Deep-linked from fleet:</strong> <code>{deepLinkedCp}</code>.
-                        This view shows the local single-CP backend on :3001 (whatever cp_id it was booted with).
-                        Fleet-wide per-CP detail is a follow-up — for now, use the fleet page for cross-CP visibility.
+                        Viewing fleet CP <code>{deepLinkedCp}</code> — live status + meter ticks
+                        come from the fleet manager. <a href="/fleet" style={{ color: 'inherit' }}>← back to fleet</a>
                     </div>
                 )}
                 <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
