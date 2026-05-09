@@ -6,6 +6,7 @@ import { TraceViewer, TraceEntry } from './components/TraceViewer';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import ConfigurationPanel from './components/ConfigurationPanel';
 import { ManualConsumption } from './components/ManualConsumption';
+import { ConnectorEditor } from './components/ConnectorEditor';
 import { api, ChargingSession, ConnectorState, PhaseMode } from './services/api';
 import { Wifi, WifiOff, Settings } from 'lucide-react';
 import './index.css';
@@ -284,6 +285,11 @@ function App() {
                                             onAction={showNotification}
                                         />
                                     </div>
+                                    <ConnectorEditor
+                                        connector={connector}
+                                        onChange={fetchStatus}
+                                        onAction={showNotification}
+                                    />
                                 </div>
                             );
                         })}
