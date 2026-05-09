@@ -33,16 +33,22 @@ export function ThemeToggle() {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Theme">
-                    <Icon className="h-4 w-4" />
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Theme"
+                    className="gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{LABELS[mode]}</span>
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-36">
+            <DropdownMenuContent align="end" sideOffset={6} className="w-36">
                 {(['light', 'dark', 'system'] as const).map((m) => {
                     const ItemIcon = ICONS[m];
                     return (
                         <DropdownMenuItem key={m} onClick={() => setMode(m)} className="gap-2">
-                            <ItemIcon className="h-4 w-4" />
+                            <ItemIcon className="h-3.5 w-3.5" />
                             <span className="flex-1">{LABELS[m]}</span>
                             {mode === m && <Check className="h-3.5 w-3.5 text-brand-orange" />}
                         </DropdownMenuItem>

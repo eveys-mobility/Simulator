@@ -67,24 +67,24 @@
      * the OG image's "3.05 kwt" pill.
      */
     .dark {
-        --background: 204 30% 9%;            /* deeper than the slate logo for canvas contrast */
+        --background: 204 30% 9%;
         --foreground: 0 0% 96%;
-        --card: 204 30% 14%;                 /* the brand slate proper */
+        --card: 204 30% 14%;
         --card-foreground: 0 0% 96%;
-        --popover: 204 30% 14%;
+        --popover: 204 30% 16%;              /* slightly lifted from card so dropdowns read clearly */
         --popover-foreground: 0 0% 96%;
-        --primary: 13 88% 58%;               /* brand orange, lifted ~5% for dark-bg legibility */
+        --primary: 13 88% 58%;
         --primary-foreground: 0 0% 100%;
         --secondary: 204 25% 19%;
         --secondary-foreground: 0 0% 96%;
         --muted: 204 22% 17%;
         --muted-foreground: 204 12% 65%;
-        --accent: 142 71% 50%;               /* charging-active green */
+        --accent: 142 71% 50%;
         --accent-foreground: 204 30% 9%;
         --destructive: 348 88% 58%;
         --destructive-foreground: 0 0% 100%;
-        --border: 204 22% 22%;
-        --input: 204 22% 22%;
+        --border: 204 22% 16%;               /* darker so it's a hairline, not a stripe */
+        --input: 204 22% 18%;
         --ring: 13 88% 58%;
     }
 
