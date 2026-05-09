@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { api, type DeviceWithRuntime } from '@/lib/api';
+import { liveKey, useLiveStore } from '@/lib/live-store';
 
 const FAULT_CODES = [
     'OtherError',
@@ -61,6 +62,15 @@ export function ManualControls({ device }: Props) {
     const [faultCode, setFaultCode] = useState<string>('OtherError');
     const [autoClear, setAutoClear] = useState('');
     const [error, setError] = useState<string | null>(null);
+
+    // Derive the live connector status. WS pushes update the live store
+    // immediately on plug-in / plug-out / fault, so the active button
+    // reflects the device's actual state, not just what we last asked for.
+    const liveStatus = useLiveStore((s) => s.connectorStatus.get(liveKey(device.id, connectorId)));
+    const status = liveStatus ?? device.connectors.find((c) => c.id === connectorId)?.status ?? 'Available';
+    const isPluggedIn = status !== 'Available' && status !== 'Faulted' && status !== 'Unavailable';
+    const isCharging = status === 'Charging';
+    const isFaulted = status === 'Faulted';
 
     const invalidate = () => {
         qc.invalidateQueries({ queryKey: ['devices'] });
@@ -158,12 +168,25 @@ export function ManualControls({ device }: Props) {
                 )}
 
                 <Section icon={<Plug className="h-3.5 w-3.5" />} title="Cable">
-                    <Button variant="secondary" onClick={() => m.plugIn.mutate()} disabled={!online || anyPending}>
+                    <Button
+                        variant={isPluggedIn ? 'default' : 'outline'}
+                        onClick={() => m.plugIn.mutate()}
+                        disabled={!online || anyPending || isPluggedIn || isFaulted}
+                        aria-pressed={isPluggedIn}
+                    >
                         <Plug className="h-4 w-4" /> Plug in
                     </Button>
-                    <Button variant="outline" onClick={() => m.plugOut.mutate()} disabled={!online || anyPending}>
+                    <Button
+                        variant={!isPluggedIn ? 'default' : 'outline'}
+                        onClick={() => m.plugOut.mutate()}
+                        disabled={!online || anyPending || (!isPluggedIn && !isCharging)}
+                        aria-pressed={!isPluggedIn}
+                    >
                         <Plug className="h-4 w-4 rotate-180" /> Plug out
                     </Button>
+                    <span className="text-xs text-muted-foreground ml-1">
+                        {isFaulted ? 'Connector faulted' : isPluggedIn ? 'Cable plugged in' : 'No cable'}
+                    </span>
                 </Section>
 
                 <Separator />
