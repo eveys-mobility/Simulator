@@ -10,6 +10,7 @@ import {
     Zap,
 } from 'lucide-react';
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -194,6 +195,7 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
     const [fraction, setFraction] = useState(50); // percent
     const [hbSeconds, setHbSeconds] = useState(300);
     const [feedback, setFeedback] = useState<string | null>(null);
+    const [confirmingStopAll, setConfirmingStopAll] = useState(false);
 
     const flash = (s: string) => {
         setFeedback(s);
@@ -315,9 +317,7 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                 <Section title="Stop sessions">
                     <Button
                         variant="destructive"
-                        onClick={() => {
-                            if (confirm('Stop every active charging session across the fleet?')) stopAll.mutate();
-                        }}
+                        onClick={() => setConfirmingStopAll(true)}
                         disabled={stopAll.isPending}
                     >
                         <AlertOctagon className="h-4 w-4" />
@@ -329,6 +329,27 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                         the actual fault-and-stop scenario.
                     </p>
                 </Section>
+
+                <ConfirmDialog
+                    open={confirmingStopAll}
+                    onOpenChange={setConfirmingStopAll}
+                    title="Stop every active session"
+                    description={
+                        <>
+                            This ends every charging session across the entire fleet with reason{' '}
+                            <span className="font-mono font-medium text-foreground">Local</span>. Type the word
+                            below to confirm — the action is irreversible.
+                        </>
+                    }
+                    confirmText="Stop all sessions"
+                    destructive
+                    typedConfirmation="STOP"
+                    pending={stopAll.isPending}
+                    onConfirm={() => {
+                        stopAll.mutate();
+                        setConfirmingStopAll(false);
+                    }}
+                />
 
                 {feedback && (
                     <div className="rounded-md border border-brand-green/40 bg-brand-green/10 p-3 text-sm text-brand-green">
