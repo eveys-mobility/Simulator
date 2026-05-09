@@ -10,6 +10,7 @@ import {
     Zap,
 } from 'lucide-react';
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,6 +63,7 @@ export function ManualControls({ device }: Props) {
     const [faultCode, setFaultCode] = useState<string>('OtherError');
     const [autoClear, setAutoClear] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [confirming, setConfirming] = useState<'emergency' | 'hard-reboot' | null>(null);
 
     // Derive the live connector status. WS pushes update the live store
     // immediately on plug-in / plug-out / fault, so the active button
@@ -261,9 +263,7 @@ export function ManualControls({ device }: Props) {
                 <Section icon={<Zap className="h-3.5 w-3.5" />} title="Lifecycle">
                     <Button
                         variant="destructive"
-                        onClick={() => {
-                            if (confirm('Trigger emergency stop on all connectors?')) m.emergencyStop.mutate();
-                        }}
+                        onClick={() => setConfirming('emergency')}
                         disabled={anyPending}
                     >
                         <AlertOctagon className="h-4 w-4" /> Emergency stop
@@ -277,14 +277,43 @@ export function ManualControls({ device }: Props) {
                     </Button>
                     <Button
                         variant="outline"
-                        onClick={() => {
-                            if (confirm('Hard reboot will abort active sessions. Continue?')) m.rebootHard.mutate();
-                        }}
+                        onClick={() => setConfirming('hard-reboot')}
                         disabled={anyPending}
                     >
                         <PlugZap className="h-4 w-4" /> Hard reboot
                     </Button>
                 </Section>
+
+                <ConfirmDialog
+                    open={confirming === 'emergency'}
+                    onOpenChange={(o) => {
+                        if (!o) setConfirming(null);
+                    }}
+                    title="Emergency stop"
+                    description="This stops every active charging session on the device immediately. The CSMS sees an EmergencyStop reason on the StopTransaction."
+                    confirmText="Trigger stop"
+                    destructive
+                    pending={m.emergencyStop.isPending}
+                    onConfirm={() => {
+                        m.emergencyStop.mutate();
+                        setConfirming(null);
+                    }}
+                />
+                <ConfirmDialog
+                    open={confirming === 'hard-reboot'}
+                    onOpenChange={(o) => {
+                        if (!o) setConfirming(null);
+                    }}
+                    title="Hard reboot"
+                    description="A hard reboot aborts every active session and tears the OCPP socket down. Use only when the simulated charger is wedged."
+                    confirmText="Reboot"
+                    destructive
+                    pending={m.rebootHard.isPending}
+                    onConfirm={() => {
+                        m.rebootHard.mutate();
+                        setConfirming(null);
+                    }}
+                />
 
                 {error && (
                     <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive-foreground">
