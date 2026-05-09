@@ -1,7 +1,9 @@
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import {
+    AcWiringSchema,
     DCBatteryProfileSchema,
+    DEFAULT_AC_WIRING,
     DEVICE_DEFAULTS,
     type Device,
     DeviceTypeSchema,
@@ -59,6 +61,7 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             maxPowerKw: body.data.maxPowerKw ?? defaults.maxPowerKw,
             ocppUrl: body.data.ocppUrl ?? currentDefaultOcppUrl,
             phaseMode: body.data.phaseMode ?? 'balanced',
+            acWiring: body.data.type === 'AC' ? DEFAULT_AC_WIRING : undefined,
             dcProfile:
                 body.data.type === 'DC'
                     ? { ...DCBatteryProfileSchema.parse({ capacityKwh: 60, chargerMaxKw: defaults.maxPowerKw }), ...body.data.dcProfile }
@@ -83,6 +86,7 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         maxPowerKw: z.number().positive().max(1000).optional(),
         ocppUrl: z.string().url().optional(),
         phaseMode: PhaseModeSchema.optional(),
+        acWiring: AcWiringSchema.partial().optional(),
         dcProfile: DCBatteryProfileSchema.partial().optional(),
     });
 
@@ -110,6 +114,10 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             ? DCBatteryProfileSchema.parse({ ...(existing.dcProfile ?? {}), ...body.data.dcProfile })
             : existing.dcProfile;
 
+        const mergedAcWiring = body.data.acWiring
+            ? AcWiringSchema.parse({ ...(existing.acWiring ?? DEFAULT_AC_WIRING), ...body.data.acWiring })
+            : existing.acWiring;
+
         // Model string is derived from type + maxPowerKw so BootNotification
         // matches the active config (the gateway sees `Eveys-22kW-AC` etc.).
         const maxPowerKw = body.data.maxPowerKw ?? existing.maxPowerKw;
@@ -127,6 +135,7 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             model,
             ocppUrl: body.data.ocppUrl ?? existing.ocppUrl,
             phaseMode: body.data.phaseMode ?? existing.phaseMode,
+            acWiring: mergedAcWiring,
             dcProfile: mergedDcProfile,
         };
 
@@ -137,6 +146,7 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             maxPowerKw: merged.maxPowerKw,
             ocppUrl: merged.ocppUrl,
             phaseMode: merged.phaseMode,
+            acWiring: merged.acWiring,
             dcProfile: merged.dcProfile,
         });
         // Model lives in the same row but isn't in the patch type (clients
@@ -147,6 +157,17 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
 
         if (changedRespawnFields.length > 0) {
             await manager.respawn(merged);
+        } else {
+            // Push the edit into the running Simulator so the next tick
+            // / next status frame uses the new wiring / phase mode /
+            // dc profile / name. Without this the in-memory device
+            // snapshot stays stale until restart.
+            manager.get(req.params.id)?.applyDeviceEdit({
+                displayName: merged.displayName,
+                phaseMode: merged.phaseMode,
+                acWiring: merged.acWiring,
+                dcProfile: merged.dcProfile,
+            });
         }
         return withRuntime(merged, manager);
     });

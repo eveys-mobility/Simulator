@@ -1,4 +1,4 @@
-import type { Connector, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
+import type { AcWiring, Connector, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
 
 export interface DeviceWithRuntime extends Device {
     online: boolean;
@@ -37,6 +37,7 @@ export const api = {
             maxPowerKw?: number;
             ocppUrl?: string;
             phaseMode?: PhaseMode;
+            acWiring?: Partial<AcWiring>;
             dcProfile?: Partial<DCBatteryProfile>;
         },
     ) => http<DeviceWithRuntime>('PATCH', `/devices/${id}`, body),

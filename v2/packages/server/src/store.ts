@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
+import type { AcWiring, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
 
 /**
  * SQLite-backed store. Single file, two tables. Schema is versioned
@@ -37,8 +37,10 @@ export class Store {
         this.db
             .prepare(
                 `INSERT INTO devices
-                  (id, display_name, type, model, vendor, firmware_version, max_power_kw, ocpp_url, phase_mode, dc_profile, created_at)
-                 VALUES (@id, @displayName, @type, @model, @vendor, @firmwareVersion, @maxPowerKw, @ocppUrl, @phaseMode, @dcProfile, @createdAt)`,
+                  (id, display_name, type, model, vendor, firmware_version, max_power_kw, ocpp_url,
+                   phase_mode, ac_wiring, dc_profile, created_at)
+                 VALUES (@id, @displayName, @type, @model, @vendor, @firmwareVersion, @maxPowerKw, @ocppUrl,
+                         @phaseMode, @acWiring, @dcProfile, @createdAt)`,
             )
             .run({
                 id: d.id,
@@ -50,6 +52,7 @@ export class Store {
                 maxPowerKw: d.maxPowerKw,
                 ocppUrl: d.ocppUrl,
                 phaseMode: d.phaseMode,
+                acWiring: d.acWiring ? JSON.stringify(d.acWiring) : null,
                 dcProfile: d.dcProfile ? JSON.stringify(d.dcProfile) : null,
                 createdAt: d.createdAt,
             });
@@ -60,7 +63,14 @@ export class Store {
         patch: Partial<
             Pick<
                 Device,
-                'displayName' | 'vendor' | 'firmwareVersion' | 'maxPowerKw' | 'ocppUrl' | 'phaseMode' | 'dcProfile'
+                | 'displayName'
+                | 'vendor'
+                | 'firmwareVersion'
+                | 'maxPowerKw'
+                | 'ocppUrl'
+                | 'phaseMode'
+                | 'acWiring'
+                | 'dcProfile'
             >
         >,
     ): void {
@@ -89,6 +99,10 @@ export class Store {
         if (patch.phaseMode !== undefined) {
             sets.push('phase_mode = @phaseMode');
             params.phaseMode = patch.phaseMode;
+        }
+        if (patch.acWiring !== undefined) {
+            sets.push('ac_wiring = @acWiring');
+            params.acWiring = patch.acWiring ? JSON.stringify(patch.acWiring) : null;
         }
         if (patch.dcProfile !== undefined) {
             sets.push('dc_profile = @dcProfile');
@@ -228,6 +242,7 @@ interface DeviceRow {
     max_power_kw: number;
     ocpp_url: string;
     phase_mode: string;
+    ac_wiring: string | null;
     dc_profile: string | null;
     created_at: string;
 }
@@ -243,6 +258,7 @@ function rowToDevice(r: DeviceRow): Device {
         maxPowerKw: r.max_power_kw,
         ocppUrl: r.ocpp_url,
         phaseMode: r.phase_mode as PhaseMode,
+        acWiring: r.ac_wiring ? (JSON.parse(r.ac_wiring) as AcWiring) : undefined,
         dcProfile: r.dc_profile ? (JSON.parse(r.dc_profile) as DCBatteryProfile) : undefined,
         createdAt: r.created_at,
     };
@@ -331,6 +347,12 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 value TEXT NOT NULL
             );
         `);
+    },
+    // v4 — per-device AC wiring (phases, nominal/line-to-line voltage,
+    // line-to-line reporting flag). Stored as JSON for the same reason
+    // as dc_profile: small, optional, easier to evolve than columns.
+    (db) => {
+        db.exec(`ALTER TABLE devices ADD COLUMN ac_wiring TEXT`);
     },
 ];
 

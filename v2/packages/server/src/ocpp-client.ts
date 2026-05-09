@@ -325,19 +325,28 @@ export class OcppClient extends EventEmitter {
         });
     }
 
-    sendMeterValue(connectorId: number, transactionId: number, energyWh: number, powerW: number): Promise<unknown> {
+    /**
+     * Send a MeterValues frame whose `sampledValue[]` is computed by
+     * the caller. The Simulator builds the array from the AC/DC
+     * measurand emitters in @ocpp-sim/core/sim, filtered against the
+     * device's `MeterValuesSampledData` config key.
+     */
+    sendMeterValueRich(connectorId: number, transactionId: number, sampledValue: unknown[]): Promise<unknown> {
         return this.call('MeterValues', {
             connectorId,
             transactionId,
-            meterValue: [
-                {
-                    timestamp: new Date().toISOString(),
-                    sampledValue: [
-                        { value: String(Math.round(energyWh)), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
-                        { value: String(Math.round(powerW)), measurand: 'Power.Active.Import', unit: 'W' },
-                    ],
-                },
-            ],
+            meterValue: [{ timestamp: new Date().toISOString(), sampledValue }],
         });
+    }
+
+    /**
+     * Convenience for trigger-message paths and tests. Emits the same
+     * minimal pair the v1 simulator did.
+     */
+    sendMeterValue(connectorId: number, transactionId: number, energyWh: number, powerW: number): Promise<unknown> {
+        return this.sendMeterValueRich(connectorId, transactionId, [
+            { value: String(Math.round(energyWh)), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
+            { value: String(Math.round(powerW)), measurand: 'Power.Active.Import', unit: 'W' },
+        ]);
     }
 }

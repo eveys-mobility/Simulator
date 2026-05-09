@@ -84,6 +84,32 @@ describe('Store — devices', () => {
         s.close();
     });
 
+    it('roundtrips an AC wiring config', () => {
+        const s = new Store(':memory:');
+        s.insertDevice({
+            ...sample,
+            acWiring: { phases: 1, nominalVoltageV: 240, lineToLineV: 415, reportLineToLine: false },
+        });
+        const d = s.getDevice(sample.id);
+        expect(d?.acWiring).toEqual({
+            phases: 1,
+            nominalVoltageV: 240,
+            lineToLineV: 415,
+            reportLineToLine: false,
+        });
+        s.close();
+    });
+
+    it('updateDevice patches acWiring', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.updateDevice(sample.id, {
+            acWiring: { phases: 3, nominalVoltageV: 230, lineToLineV: 400, reportLineToLine: true },
+        });
+        expect(s.getDevice(sample.id)?.acWiring?.reportLineToLine).toBe(true);
+        s.close();
+    });
+
     it('updates a single field without touching the rest', () => {
         const s = new Store(':memory:');
         s.insertDevice(sample);

@@ -21,6 +21,11 @@ interface FormState {
     maxPowerKw: string;
     ocppUrl: string;
     phaseMode: PhaseMode;
+    // AC wiring (only meaningful when device.type === 'AC')
+    acPhases: '1' | '3';
+    acNominalV: string;
+    acLineToLineV: string;
+    acReportLineToLine: boolean;
     // DC profile, present only when device.type === 'DC'
     capacityKwh: string;
     chargerMaxKw: string;
@@ -40,6 +45,10 @@ function formFromDevice(d: DeviceWithRuntime): FormState {
         maxPowerKw: String(d.maxPowerKw),
         ocppUrl: d.ocppUrl,
         phaseMode: d.phaseMode,
+        acPhases: ((d.acWiring?.phases ?? 3).toString() as '1' | '3'),
+        acNominalV: String(d.acWiring?.nominalVoltageV ?? 230),
+        acLineToLineV: String(d.acWiring?.lineToLineV ?? 400),
+        acReportLineToLine: !!d.acWiring?.reportLineToLine,
         capacityKwh: d.dcProfile ? String(d.dcProfile.capacityKwh) : '60',
         chargerMaxKw: d.dcProfile ? String(d.dcProfile.chargerMaxKw) : '100',
         nominalVoltageV: d.dcProfile ? String(d.dcProfile.nominalVoltageV) : '400',
@@ -82,6 +91,22 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
             if (Number.isFinite(mp) && mp > 0 && mp !== device.maxPowerKw) body.maxPowerKw = mp;
             if (form.ocppUrl.trim() !== device.ocppUrl) body.ocppUrl = form.ocppUrl.trim();
             if (form.phaseMode !== device.phaseMode) body.phaseMode = form.phaseMode;
+            if (device.type === 'AC') {
+                const ac = {
+                    phases: (Number(form.acPhases) === 1 ? 1 : 3) as 1 | 3,
+                    nominalVoltageV: Number(form.acNominalV),
+                    lineToLineV: Number(form.acLineToLineV),
+                    reportLineToLine: form.acReportLineToLine,
+                };
+                const original = device.acWiring;
+                const changed =
+                    !original ||
+                    ac.phases !== original.phases ||
+                    ac.nominalVoltageV !== original.nominalVoltageV ||
+                    ac.lineToLineV !== original.lineToLineV ||
+                    ac.reportLineToLine !== original.reportLineToLine;
+                if (changed) body.acWiring = ac;
+            }
             if (device.type === 'DC') {
                 const dc = {
                     capacityKwh: Number(form.capacityKwh),
@@ -171,17 +196,61 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
 
                     {device.type === 'AC' ? (
                         <Section title="AC settings">
+                            <Field label="Phases">
+                                <select
+                                    value={form.acPhases}
+                                    onChange={set('acPhases')}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                >
+                                    <option value="3">3-phase (L1, L2, L3)</option>
+                                    <option value="1">Single phase (L1 only)</option>
+                                </select>
+                            </Field>
                             <Field label="Phase mode">
                                 <select
                                     value={form.phaseMode}
                                     onChange={set('phaseMode')}
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    disabled={form.acPhases === '1'}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
                                 >
-                                    <option value="balanced">Balanced (3-phase)</option>
-                                    <option value="imbalanced">Imbalanced (3-phase)</option>
-                                    <option value="single-phase">Single phase</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="imbalanced">Imbalanced (60/30/10)</option>
+                                    <option value="single-phase">All on L1</option>
                                 </select>
                             </Field>
+                            <Field label="Nominal voltage L-N (V)">
+                                <Input
+                                    type="number"
+                                    value={form.acNominalV}
+                                    onChange={set('acNominalV')}
+                                    step="1"
+                                    min="100"
+                                    max="500"
+                                />
+                            </Field>
+                            <Field label="Line-to-line voltage (V)">
+                                <Input
+                                    type="number"
+                                    value={form.acLineToLineV}
+                                    onChange={set('acLineToLineV')}
+                                    step="1"
+                                    min="100"
+                                    max="800"
+                                    disabled={form.acPhases === '1'}
+                                />
+                            </Field>
+                            <label className="col-span-full inline-flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={form.acReportLineToLine}
+                                    onChange={(e) =>
+                                        setForm((f) => ({ ...f, acReportLineToLine: e.target.checked }))
+                                    }
+                                    disabled={form.acPhases === '1'}
+                                    className="h-4 w-4 rounded border-input bg-background"
+                                />
+                                <span>Also report L1-L2 / L2-L3 / L3-L1 voltage in MeterValues</span>
+                            </label>
                         </Section>
                     ) : (
                         <Section title="DC battery profile">
