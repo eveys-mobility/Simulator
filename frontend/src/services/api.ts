@@ -365,8 +365,11 @@ class ApiService {
     }
 
     async pauseCharging(connectorId: number = 1): Promise<any> {
-        if (fleetMode) {
-            return { success: false, message: 'pause/resume not yet supported in fleet mode' };
+        if (fleetMode && fleetCpId) {
+            await fleetFetch(`/fleet/cps/${encodeURIComponent(fleetCpId)}/actions/pause`, {
+                connector_id: connectorId,
+            });
+            return { success: true };
         }
         const response = await fetch(`${API_BASE_URL}/pause-charging`, {
             method: 'POST',
@@ -377,8 +380,11 @@ class ApiService {
     }
 
     async resumeCharging(connectorId: number = 1): Promise<any> {
-        if (fleetMode) {
-            return { success: false, message: 'pause/resume not yet supported in fleet mode' };
+        if (fleetMode && fleetCpId) {
+            await fleetFetch(`/fleet/cps/${encodeURIComponent(fleetCpId)}/actions/resume`, {
+                connector_id: connectorId,
+            });
+            return { success: true };
         }
         const response = await fetch(`${API_BASE_URL}/resume-charging`, {
             method: 'POST',
