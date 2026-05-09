@@ -7,7 +7,7 @@
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
         "start": "node dist/index.js",
-        "test": "tsx --test src/protocol.test.ts src/registry.test.ts src/sqlite.test.ts src/supervisor.test.ts src/load-balancer.test.ts",
+        "test": "tsx --test src/protocol.test.ts src/registry.test.ts src/sqlite.test.ts src/supervisor.test.ts",
         "load-test": "tsx scripts/load-test.ts"
     },
     "dependencies": {

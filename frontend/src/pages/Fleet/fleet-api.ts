@@ -11,7 +11,6 @@ const FLEET_WS_URL = (() => {
 })();
 
 export type CPType = 'AC' | 'DC';
-export type LbStrategy = 'round_robin' | 'least_active';
 export type SessionStatus = 'active' | 'completed' | 'aborted';
 export type PhaseMode = 'balanced' | 'imbalanced' | 'single-phase';
 
@@ -28,9 +27,6 @@ export interface FleetGroup {
     id: number;
     name: string;
     type: CPType;
-    lb_strategy: LbStrategy;
-    lb_enabled: number; // 0 / 1
-    lb_round_robin_cursor: number;
     created_at: string;
 }
 
@@ -84,10 +80,10 @@ export const fleetApi = {
     listGroups(): Promise<FleetGroup[]> {
         return request<{ groups: FleetGroup[] }>('/groups').then((r) => r.groups);
     },
-    createGroup(body: { name: string; type: CPType; lb_strategy?: LbStrategy; lb_enabled?: boolean }): Promise<FleetGroup> {
+    createGroup(body: { name: string; type: CPType }): Promise<FleetGroup> {
         return request<{ group: FleetGroup }>('/groups', { method: 'POST', body: JSON.stringify(body) }).then((r) => r.group);
     },
-    patchGroup(id: number, body: Partial<{ name: string; lb_strategy: LbStrategy; lb_enabled: boolean }>): Promise<FleetGroup> {
+    patchGroup(id: number, body: Partial<{ name: string }>): Promise<FleetGroup> {
         return request<{ group: FleetGroup }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(body) }).then((r) => r.group);
     },
     deleteGroup(id: number): Promise<void> {
@@ -144,13 +140,6 @@ export const fleetApi = {
         return request<{ sessions: FleetSession[] }>(`/sessions${qs ? '?' + qs : ''}`).then((r) => r.sessions);
     },
 
-    /** LB-driven session start. Returns the picked cp_id+connector_id. */
-    startSessionInGroup(group_id: number, body: { id_tag?: string; cp_id?: string; connector_id?: number } = {}): Promise<{ cp_id: string; connector_id: number; id_tag: string }> {
-        return request<{ cp_id: string; connector_id: number; id_tag: string }>(`/groups/${group_id}/sessions`, {
-            method: 'POST',
-            body: JSON.stringify(body),
-        }).then((r) => ({ cp_id: r.cp_id, connector_id: r.connector_id, id_tag: r.id_tag }));
-    },
 };
 
 // ---- WS ----

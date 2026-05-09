@@ -10,8 +10,7 @@ import express, { Request, Response, Router } from 'express';
 import { Registry, generateCPId } from './registry';
 import { WorkerSupervisor, SpawnSpec } from './supervisor';
 import { CPType, PhaseMode, DCBatteryProfile, DownMessage } from './protocol';
-import { FleetStore, parseDCProfile, LbStrategy, SessionStatus } from './sqlite';
-import { pickCp } from './load-balancer';
+import { FleetStore, parseDCProfile, SessionStatus } from './sqlite';
 
 interface CreateCPBody {
     cp_id?: string;
@@ -27,8 +26,6 @@ interface CreateCPBody {
 interface CreateGroupBody {
     name?: string;
     type?: CPType;
-    lb_strategy?: LbStrategy;
-    lb_enabled?: boolean;
 }
 
 export function createFleetRouter(args: {
@@ -271,19 +268,11 @@ export function createFleetRouter(args: {
         if (body.type !== 'AC' && body.type !== 'DC') {
             return res.status(400).json({ success: false, error: 'type must be AC or DC' });
         }
-        if (body.lb_strategy && body.lb_strategy !== 'round_robin' && body.lb_strategy !== 'least_active') {
-            return res.status(400).json({ success: false, error: 'lb_strategy must be round_robin or least_active' });
-        }
         if (store.getGroupByName(body.name)) {
             return res.status(409).json({ success: false, error: `group ${body.name} already exists` });
         }
         try {
-            const g = store.createGroup({
-                name: body.name,
-                type: body.type,
-                lb_strategy: body.lb_strategy,
-                lb_enabled: body.lb_enabled,
-            });
+            const g = store.createGroup({ name: body.name, type: body.type });
             return res.status(201).json({ success: true, group: g });
         } catch (err) {
             return res.status(500).json({ success: false, error: (err as Error).message });
@@ -295,11 +284,7 @@ export function createFleetRouter(args: {
         if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
         if (!store.getGroup(id)) return res.status(404).json({ success: false, error: 'not_found' });
         const body = req.body as Partial<CreateGroupBody>;
-        const updated = store.updateGroup(id, {
-            name: body.name,
-            lb_strategy: body.lb_strategy,
-            lb_enabled: body.lb_enabled,
-        });
+        const updated = store.updateGroup(id, { name: body.name });
         return res.json({ success: true, group: updated });
     });
 
@@ -308,59 +293,8 @@ export function createFleetRouter(args: {
         if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
         const ok = store.deleteGroup(id);
         if (!ok) return res.status(404).json({ success: false, error: 'not_found' });
-        // SQLite's ON DELETE SET NULL has already cleared cp.group_id;
-        // the runtime registry doesn't track group affiliation in MR-D
-        // (that's an MR-F field), so nothing to patch in-memory yet.
+        // SQLite's ON DELETE SET NULL has already cleared cp.group_id.
         return res.json({ success: true });
-    });
-
-    // LB-driven session start. Body: { id_tag, cp_id?, connector_id? }
-    //   - lb_enabled=true: chooses cp_id+connector_id via pickCp()
-    //   - lb_enabled=false: requires explicit cp_id; LB is bypassed
-    // Returns 503 when nothing in the group is eligible.
-    router.post('/groups/:id/sessions', (req: Request, res: Response) => {
-        const id = parseInt(req.params.id, 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
-        const g = store.getGroup(id);
-        if (!g) return res.status(404).json({ success: false, error: 'group not_found' });
-
-        const body = req.body ?? {};
-        const id_tag = typeof body.id_tag === 'string' ? body.id_tag : 'TEST-TAG-001';
-
-        let cp_id: string | undefined;
-        let connector_id: number | undefined;
-
-        if (g.lb_enabled === 1) {
-            const candidates = store.listCPs().filter((c) => c.group_id === id);
-            const cursor = g.lb_round_robin_cursor;
-            const pick = pickCp({ group: g, candidates, registry, cursor });
-            if (!pick) {
-                return res.status(503).json({ success: false, error: 'no eligible CP in group' });
-            }
-            cp_id = pick.cp_id;
-            connector_id = pick.connector_id;
-            if (g.lb_strategy === 'round_robin') {
-                store.advanceRoundRobinCursor(id);
-            }
-        } else {
-            if (typeof body.cp_id !== 'string' || typeof body.connector_id !== 'number') {
-                return res.status(400).json({ success: false, error: 'lb disabled — cp_id (string) and connector_id (number) required' });
-            }
-            // Verify the explicit CP is in the group; otherwise the
-            // caller is asking for the wrong group and should know.
-            const row = store.getCP(body.cp_id);
-            if (!row || row.group_id !== id) {
-                return res.status(400).json({ success: false, error: 'cp_id not in group' });
-            }
-            cp_id = body.cp_id;
-            connector_id = body.connector_id;
-        }
-
-        const sent = supervisor.send(cp_id!, { type: 'plug_in', connector_id: connector_id!, id_tag });
-        if (!sent) return res.status(503).json({ success: false, error: 'worker not running' });
-        supervisor.send(cp_id!, { type: 'start_charging', connector_id: connector_id! });
-
-        return res.json({ success: true, cp_id, connector_id, id_tag });
     });
 
     // ---- sessions ----

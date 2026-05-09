@@ -72,15 +72,15 @@ async function main(): Promise<void> {
     const args = parseArgs();
     console.log(`[load-test] target=${args.base} ac=${args.ac} dc=${args.dc} sessions=${args.sessions}`);
 
-    // Pre-create a group so the LB endpoint has somewhere to put
-    // the sessions.
+    // Pre-create a group as a label for the test CPs (so the
+    // teardown step has a single id to delete). Groups are
+    // organisational only — there's no LB endpoint to drive
+    // sessions through.
     const groupResp = await api<{ group: { id: number } }>(args.base + '/fleet/groups', {
         method: 'POST',
         body: JSON.stringify({
             name: `load-test-${Date.now()}`,
             type: 'AC',
-            lb_strategy: 'least_active',
-            lb_enabled: true,
         }),
     });
     const groupId = groupResp.group.id;
@@ -139,15 +139,23 @@ async function main(): Promise<void> {
         }
 
         // ----- Concurrent sessions -----
+        // No LB endpoint — script picks CPs by index (round-robin
+        // over what it spawned). Each session targets a specific
+        // cp_id directly via the per-CP action endpoints.
         const sessionLatencies: number[] = [];
         const sessionPromises: Array<Promise<void>> = [];
         for (let i = 0; i < args.sessions; i++) {
+            const targetCp = acIds[i % acIds.length];
             sessionPromises.push((async () => {
                 const t0 = Date.now();
                 try {
-                    await api(args.base + `/fleet/groups/${groupId}/sessions`, {
+                    await api(args.base + `/fleet/cps/${targetCp}/actions/plug-in`, {
                         method: 'POST',
-                        body: JSON.stringify({ id_tag: `LT-${i}` }),
+                        body: JSON.stringify({ connector_id: 1, id_tag: `LT-${i}` }),
+                    });
+                    await api(args.base + `/fleet/cps/${targetCp}/actions/start`, {
+                        method: 'POST',
+                        body: JSON.stringify({ connector_id: 1 }),
                     });
                     sessionLatencies.push(Date.now() - t0);
                 } catch (err) {

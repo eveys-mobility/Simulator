@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fleetApi, CPType, LbStrategy } from './fleet-api';
+import { fleetApi, CPType } from './fleet-api';
 
 interface NewGroupDialogProps {
     onClose: () => void;
@@ -10,14 +10,13 @@ interface NewGroupDialogProps {
 export const NewGroupDialog: React.FC<NewGroupDialogProps> = ({ onClose, onCreated, onAction }) => {
     const [name, setName] = useState('');
     const [type, setType] = useState<CPType>('AC');
-    const [strategy, setStrategy] = useState<LbStrategy>('round_robin');
     const [busy, setBusy] = useState(false);
 
     const submit = async (): Promise<void> => {
         if (!name.trim()) return;
         setBusy(true);
         try {
-            const g = await fleetApi.createGroup({ name: name.trim(), type, lb_strategy: strategy, lb_enabled: true });
+            const g = await fleetApi.createGroup({ name: name.trim(), type });
             onAction(`group ${g.name} created`);
             onCreated();
             onClose();
@@ -44,12 +43,6 @@ export const NewGroupDialog: React.FC<NewGroupDialogProps> = ({ onClose, onCreat
                 <select value={type} onChange={(e) => setType(e.target.value as CPType)} style={inputStyle}>
                     <option value="AC">AC (Type 2, 1 connector / CP)</option>
                     <option value="DC">DC (CCS, 2 connectors / CP)</option>
-                </select>
-            </Field>
-            <Field label="LB strategy">
-                <select value={strategy} onChange={(e) => setStrategy(e.target.value as LbStrategy)} style={inputStyle}>
-                    <option value="round_robin">round_robin</option>
-                    <option value="least_active">least_active</option>
                 </select>
             </Field>
             <DialogActions>
