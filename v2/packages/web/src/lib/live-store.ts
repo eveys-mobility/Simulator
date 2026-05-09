@@ -53,11 +53,16 @@ interface LiveState {
     nextTraceSeq: number;
     /** Latest progress sample per benchmark runId, keyed numerically. */
     benchmarkProgress: Map<number, BenchmarkProgress>;
+    /** Server-side coalescing telemetry. Each `frames-coalesced` WS
+     *  message bumps the counter; we keep the last sample timestamp
+     *  so the UI can dim the indicator after the load drops. */
+    coalesce: { totalDropped: number; lastSampleAt: number; lastWindowDropped: number };
     setBenchmarkProgress: (p: BenchmarkProgress) => void;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
     applyTick: (t: MeterTick) => void;
     appendFrame: (e: Omit<TraceEntry, 'seq'>) => void;
+    recordCoalescedDrop: (count: number) => void;
     clearTraces: (deviceId: string) => void;
     reset: (deviceId: string) => void;
     /** Drop every map entry whose deviceId isn't in `keep`. Called from
@@ -73,6 +78,7 @@ export const useLiveStore = create<LiveState>((set) => ({
     traces: new Map(),
     nextTraceSeq: 0,
     benchmarkProgress: new Map(),
+    coalesce: { totalDropped: 0, lastSampleAt: 0, lastWindowDropped: 0 },
 
     setBenchmarkProgress: (p) =>
         set((s) => {
@@ -120,6 +126,15 @@ export const useLiveStore = create<LiveState>((set) => ({
             next.set(e.deviceId, updated);
             return { traces: next, nextTraceSeq: seq };
         }),
+
+    recordCoalescedDrop: (count) =>
+        set((s) => ({
+            coalesce: {
+                totalDropped: s.coalesce.totalDropped + count,
+                lastSampleAt: Date.now(),
+                lastWindowDropped: count,
+            },
+        })),
 
     clearTraces: (deviceId) =>
         set((s) => {
