@@ -217,6 +217,80 @@ describe('MockCsms', () => {
         }
     });
 
+    it('sends Authorization: Basic on the WS upgrade when authPassword is set', async () => {
+        const device: Device = {
+            ...buildAcDevice('cp_test_auth', csms.url),
+            authPassword: 's3cret',
+        };
+        store.insertDevice(device);
+        sim = silenceErrors(new Simulator(device, store));
+        await sim.start();
+
+        const handle = await csms.waitForDevice(device.id);
+        const auth = handle.upgradeHeaders.authorization;
+        expect(typeof auth).toBe('string');
+        expect(auth).toMatch(/^Basic /);
+        const decoded = Buffer.from((auth as string).replace(/^Basic /, ''), 'base64').toString();
+        expect(decoded).toBe('cp_test_auth:s3cret');
+    });
+
+    it('omits Authorization when no authPassword is set', async () => {
+        const device = buildAcDevice('cp_test_noauth', csms.url);
+        store.insertDevice(device);
+        sim = silenceErrors(new Simulator(device, store));
+        await sim.start();
+
+        const handle = await csms.waitForDevice(device.id);
+        expect(handle.upgradeHeaders.authorization).toBeUndefined();
+    });
+
+    it('honors BootNotification Pending — defers heartbeat + status frames', async () => {
+        // Override the BootNotification handler to return Pending the
+        // first time, Accepted the second. The simulator must not send
+        // StatusNotification while bootDeferred is true.
+        let bootCount = 0;
+        const csmsPending = new MockCsms({
+            handlers: {
+                BootNotification: () => {
+                    bootCount += 1;
+                    if (bootCount === 1) {
+                        return { status: 'Pending', currentTime: new Date().toISOString(), interval: 1 };
+                    }
+                    return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
+                },
+            },
+        });
+        await csmsPending.start();
+        const localStore = new Store(':memory:');
+        const device = buildAcDevice('cp_test_pending', csmsPending.url);
+        localStore.insertDevice(device);
+        const localSim = silenceErrors(new Simulator(device, localStore));
+        await localSim.start();
+
+        try {
+            const handle = await csmsPending.waitForDevice(device.id);
+            // Wait long enough for the retry (interval=1s) to fire and
+            // the second BootNotification to come back Accepted.
+            const deadline = Date.now() + 4000;
+            while (bootCount < 2 && Date.now() < deadline) {
+                await sleep(50);
+            }
+            expect(bootCount).toBeGreaterThanOrEqual(2);
+
+            // Once Accepted, StatusNotification should follow.
+            await handle.waitForStatus('Available', 1, 3000);
+
+            // Sanity: at least 2 BootNotification CALLs landed.
+            const boots = handle.framesFor('BootNotification').filter((f) => f.direction === 'in');
+            expect(boots.length).toBeGreaterThanOrEqual(2);
+        } finally {
+            localSim.stop();
+            await sleep(50);
+            localStore.close();
+            await csmsPending.stop();
+        }
+    });
+
     it('multiple devices on the same CSMS are independent', async () => {
         const a = buildAcDevice('cp_multi_a', csms.url);
         const b = buildAcDevice('cp_multi_b', csms.url);

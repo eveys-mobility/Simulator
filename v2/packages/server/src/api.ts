@@ -41,22 +41,53 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     // Bearer-token gate. When AUTH_TOKEN is set, every /api/* and
     // /metrics request needs the right token. /api/health stays open
-    // so health probes don't require credentials.
+    // so health probes don't require credentials. /api/auth/ping is
+    // also open so the SPA can verify a token before storing it.
     if (authToken) {
         app.addHook('onRequest', async (req, reply) => {
             const url = req.url ?? '';
+            const path = url.split('?')[0] ?? url;
             const isProtected =
-                (url.startsWith('/api/') || url.startsWith('/metrics')) && url !== '/api/health';
+                (path.startsWith('/api/') || path.startsWith('/metrics')) &&
+                path !== '/api/health' &&
+                path !== '/api/auth/ping';
             if (!isProtected) return;
+            // Three places a client can put the token, in order of
+            // preference: Authorization header, ?token= query param
+            // (browser WebSocket has no way to set headers), or the
+            // Sec-WebSocket-Protocol header (subprotocol).
             const header = req.headers.authorization ?? '';
-            const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
-            // Constant-time-ish compare: lengths first, then byte-equal.
+            let presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+            if (!presented) {
+                const qIdx = url.indexOf('?');
+                if (qIdx >= 0) {
+                    const params = new URLSearchParams(url.slice(qIdx + 1));
+                    presented = params.get('token') ?? '';
+                }
+            }
+            if (!presented) {
+                const proto = req.headers['sec-websocket-protocol'];
+                if (typeof proto === 'string') {
+                    // Convention: clients send `bearer.<token>` as a
+                    // subprotocol value. We don't echo it back as the
+                    // selected protocol — the WS upgrade in fastify-websocket
+                    // will pick the first listed one anyway.
+                    const parts = proto.split(',').map((s) => s.trim());
+                    const bearer = parts.find((p) => p.startsWith('bearer.'));
+                    if (bearer) presented = bearer.slice('bearer.'.length);
+                }
+            }
             const ok = presented.length === authToken.length && presented === authToken;
             if (!ok) {
                 reply.code(401).send({ error: 'unauthorized' });
             }
         });
     }
+
+    // Lightweight endpoint the SPA hits to confirm a token is good
+    // (or that auth is off). Always 200 — the auth hook above either
+    // lets the request through or 401s before we get here.
+    app.get('/api/auth/ping', async () => ({ authRequired: Boolean(authToken) }));
 
     // Mutable so the Settings PUT can update what new devices default to.
     let currentDefaultOcppUrl = defaultOcppUrl;
@@ -78,6 +109,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         displayName: z.string().min(1).max(80).optional(),
         maxPowerKw: z.number().positive().optional(),
         ocppUrl: z.string().url().optional(),
+        authPassword: z.string().min(1).max(200).optional(),
         phaseMode: PhaseModeSchema.optional(),
         dcProfile: DCBatteryProfileSchema.partial().optional(),
     });
@@ -95,6 +127,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         displayName?: string;
         maxPowerKw?: number;
         ocppUrl?: string;
+        authPassword?: string;
         phaseMode?: 'balanced' | 'imbalanced' | 'single-phase';
         dcProfile?: Partial<z.infer<typeof DCBatteryProfileSchema>>;
     }): Device => {
@@ -109,6 +142,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             firmwareVersion: '1.0.0',
             maxPowerKw: input.maxPowerKw ?? defaults.maxPowerKw,
             ocppUrl: input.ocppUrl ?? currentDefaultOcppUrl,
+            authPassword: input.authPassword,
             phaseMode: input.phaseMode ?? 'balanced',
             acWiring: input.type === 'AC' ? DEFAULT_AC_WIRING : undefined,
             dcProfile:
@@ -177,6 +211,9 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         firmwareVersion: z.string().min(1).max(40).optional(),
         maxPowerKw: z.number().positive().max(1000).optional(),
         ocppUrl: z.string().url().optional(),
+        // Empty string clears the password (back to anonymous). max(0) allows
+        // it explicitly, otherwise z.string().min(1) would block the clear.
+        authPassword: z.string().max(200).optional(),
         phaseMode: PhaseModeSchema.optional(),
         acWiring: AcWiringSchema.partial().optional(),
         dcProfile: DCBatteryProfileSchema.partial().optional(),
@@ -185,7 +222,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     /** Editing any of these requires reconnecting the OCPP socket so
      *  the gateway sees the new BootNotification. We refuse the edit
      *  if a session is active rather than yanking it mid-charge. */
-    const RESPAWN_FIELDS = ['vendor', 'firmwareVersion', 'maxPowerKw', 'ocppUrl'] as const;
+    const RESPAWN_FIELDS = ['vendor', 'firmwareVersion', 'maxPowerKw', 'ocppUrl', 'authPassword'] as const;
 
     app.patch<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
         const body = PatchDeviceBody.safeParse(req.body);
@@ -218,6 +255,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 ? `Eveys-${Math.round(maxPowerKw)}kW-${existing.type}`
                 : existing.model;
 
+        // authPassword: undefined in the body means "leave alone". An
+        // explicit empty string clears it (back to anonymous WS upgrade).
+        const mergedAuthPassword =
+            body.data.authPassword === undefined
+                ? existing.authPassword
+                : body.data.authPassword === ''
+                  ? undefined
+                  : body.data.authPassword;
+
         const merged: Device = {
             ...existing,
             displayName: body.data.displayName ?? existing.displayName,
@@ -226,6 +272,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             maxPowerKw,
             model,
             ocppUrl: body.data.ocppUrl ?? existing.ocppUrl,
+            authPassword: mergedAuthPassword,
             phaseMode: body.data.phaseMode ?? existing.phaseMode,
             acWiring: mergedAcWiring,
             dcProfile: mergedDcProfile,
@@ -237,6 +284,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             firmwareVersion: merged.firmwareVersion,
             maxPowerKw: merged.maxPowerKw,
             ocppUrl: merged.ocppUrl,
+            authPassword: body.data.authPassword === '' ? '' : merged.authPassword,
             phaseMode: merged.phaseMode,
             acWiring: merged.acWiring,
             dcProfile: merged.dcProfile,
@@ -810,8 +858,12 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 function withRuntime(d: Device, mgr: DeviceManager) {
     const sim = mgr.get(d.id);
     const snap = sim?.snapshot();
+    // Strip authPassword from the wire response — it's a shared secret.
+    // Surface only whether one is set so the UI can show "configured".
+    const { authPassword, ...safe } = d;
     return {
-        ...d,
+        ...safe,
+        hasAuthPassword: Boolean(authPassword),
         online: snap?.online ?? false,
         connectors: snap?.connectors ?? defaultConnectors(d),
     };

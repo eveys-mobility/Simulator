@@ -72,10 +72,17 @@ UI + API at <http://localhost:3001>; SQLite persists to the named volume.
 | `DB_PATH` | `/data/sim.sqlite` | `./data/sim.sqlite` | SQLite file. The Docker volume keeps it across restarts. |
 | `AUTH_TOKEN` | unset | unset | When set, every `/api/*` and `/metrics` request needs `Authorization: Bearer <token>`. `/api/health` stays open for health probes. |
 | `WEB_DIST_DIR` | `/app/packages/web/dist` | unset | Directory the server hands to fastify-static. Set automatically inside the image; leave unset in dev (Vite serves the SPA on `:5173`). |
+| `TLS_INSECURE` | unset | unset | Set to `1` to skip TLS certificate verification on `wss://` upgrades — only for self-signed dev/staging CSMSes. Never enable in production. |
 
 ### Auth
 
-`AUTH_TOKEN` is a single shared secret. It gates the REST API, the WebSocket pub/sub, and `/metrics`. `/api/health` stays open so external probes don't need credentials. The web UI doesn't currently know about the token — for an authenticated deploy, put a reverse proxy in front and have it inject the header (or run with `AUTH_TOKEN` unset behind a private network).
+`AUTH_TOKEN` is a single shared secret. It gates the REST API, the WebSocket pub/sub, and `/metrics`. `/api/health` and `/api/auth/ping` stay open so external probes (and the SPA login flow) don't need credentials. The web UI shows a sign-in screen when the backend reports `authRequired`, stores the token in `localStorage`, and attaches it to every REST and WS request. Clients that can't set headers (browser WS) can pass the token via `?token=` query param or a `bearer.<token>` subprotocol.
+
+### OCPP gateway auth
+
+OCPP 1.6 §17.4 lets a charge point present `Authorization: Basic base64(deviceId:password)` on the WebSocket upgrade. Set a per-device `authPassword` from the **Edit device** dialog (or `POST /api/devices` body) and the simulator includes it on every connect. Empty / unset = anonymous (the dev-default for most local gateways).
+
+For TLS-terminated CSMSes, point `OCPP_URL` at `wss://…`. The `ws` library handles the TLS upgrade; if the CSMS uses a self-signed cert, set `TLS_INSECURE=1` (dev only).
 
 ### Reverse proxy
 

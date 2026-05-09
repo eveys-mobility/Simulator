@@ -1,6 +1,8 @@
-import { Activity, BarChart3, Cpu, Layers, Settings, Zap } from 'lucide-react';
+import { Activity, BarChart3, Cpu, Layers, LogOut, Settings, Zap } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { Button } from '@/components/ui/button';
+import { useAuthGate } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { useApplyTheme } from '@/lib/theme';
 import { useLiveWs } from '@/lib/use-live-ws';
@@ -9,11 +11,29 @@ import { BenchmarkRunDetailPage } from '@/pages/BenchmarkRunDetailPage';
 import { DeviceDetailPage } from '@/pages/DeviceDetailPage';
 import { DevicesPage } from '@/pages/DevicesPage';
 import { FleetPage } from '@/pages/FleetPage';
+import { LoginPage } from '@/pages/LoginPage';
 import { SessionsPage } from '@/pages/SessionsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 
 export default function App() {
     useApplyTheme();
+    const auth = useAuthGate();
+
+    if (!auth.ready) {
+        // Brief flash on first paint while we probe /api/auth/ping. Keep
+        // it minimal — anything heavier (spinner, full layout) makes the
+        // login screen feel slower than it is.
+        return <div className="min-h-screen bg-background" />;
+    }
+
+    if (auth.required && !auth.authenticated) {
+        return <LoginPage onSubmit={auth.login} error={auth.error} />;
+    }
+
+    return <AuthedApp onLogout={auth.required ? auth.logout : null} />;
+}
+
+function AuthedApp({ onLogout }: { onLogout: (() => void) | null }) {
     useLiveWs();
 
     return (
@@ -48,6 +68,17 @@ export default function App() {
                             </NavItem>
                         </nav>
                         <ThemeToggle />
+                        {onLogout && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Sign out"
+                                onClick={onLogout}
+                                aria-label="Sign out"
+                            >
+                                <LogOut className="h-4 w-4" />
+                            </Button>
+                        )}
                     </div>
                 </div>
             </header>

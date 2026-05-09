@@ -14,6 +14,9 @@ const DB_PATH = resolve(process.env.DB_PATH ?? './data/sim.sqlite');
 const OCPP_URL_ENV = process.env.OCPP_URL ?? 'ws://localhost:19000';
 const AUTH_TOKEN = process.env.AUTH_TOKEN?.trim() || null;
 const WEB_DIST_DIR = process.env.WEB_DIST_DIR?.trim() || null;
+// Skip TLS certificate verification on `wss://` upgrades. Off by default;
+// flip on when pointing at a CSMS with a self-signed cert during dev.
+const TLS_INSECURE = process.env.TLS_INSECURE === '1' || process.env.TLS_INSECURE === 'true';
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const store = new Store(DB_PATH);
@@ -43,7 +46,7 @@ if (benchDevicesCleaned) {
 const persistedUrl = store.getSetting('default_ocpp_url');
 const initialOcppUrl = persistedUrl ?? OCPP_URL_ENV;
 
-const manager = new DeviceManager(store);
+const manager = new DeviceManager(store, { tlsInsecure: TLS_INSECURE });
 
 // Persist session-end events. Sessions get marked `active` at start
 // and `completed`/`aborted` only when something — manual stop endpoint,
@@ -89,6 +92,7 @@ console.log(`[server] listening on http://${HOST}:${PORT}`);
 console.log(`[server] db: ${DB_PATH}`);
 console.log(`[server] default OCPP url: ${initialOcppUrl}`);
 console.log(`[server] auth: ${AUTH_TOKEN ? 'bearer-token required' : 'none (dev mode)'}`);
+if (TLS_INSECURE) console.log('[server] TLS_INSECURE=1 — wss:// certificate verification disabled');
 if (WEB_DIST_DIR) console.log(`[server] web dist: ${WEB_DIST_DIR}`);
 
 const shutdown = async () => {
