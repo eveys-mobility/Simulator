@@ -25,6 +25,11 @@ import {
     ChargePointConfiguration,
     ConnectorStatus,
 } from '../../backend/src/models/Configuration';
+
+// Track pending fault-clear timers so they can be cancelled if the
+// worker shuts down or the connector is faulted again before the
+// auto-clear fires. Keyed by connector_id.
+const faultClearTimers = new Map<number, NodeJS.Timeout>();
 import {
     DownMessage,
     UpMessage,
@@ -205,8 +210,35 @@ async function handleEmergencyStop(msg: Extract<DownMessage, { type: 'emergency_
     }
 }
 
+async function handleFault(msg: Extract<DownMessage, { type: 'fault' }>): Promise<void> {
+    if (!chargePoint) return sendError('error', 'fault before init');
+    try {
+        // Send a Faulted StatusNotification with a generic InternalError
+        // OCPP error code — enough to drive CSMS-side fault-handling
+        // without modelling specific failure modes (over-temperature,
+        // ground fault, etc.). MR-H is a test toggle, not a fault model.
+        await chargePoint.sendStatusNotification(msg.connector_id, ConnectorStatus.Faulted, 'InternalError');
+        const existing = faultClearTimers.get(msg.connector_id);
+        if (existing) clearTimeout(existing);
+        if (typeof msg.clear_after_seconds === 'number' && msg.clear_after_seconds > 0) {
+            const timer = setTimeout(() => {
+                if (!chargePoint) return;
+                chargePoint
+                    .sendStatusNotification(msg.connector_id, ConnectorStatus.Available)
+                    .catch((err: Error) => sendError('warn', `auto-clear fault failed: ${err.message}`));
+                faultClearTimers.delete(msg.connector_id);
+            }, msg.clear_after_seconds * 1000);
+            faultClearTimers.set(msg.connector_id, timer);
+        }
+    } catch (err) {
+        sendError('error', `fault failed: ${(err as Error).message}`);
+    }
+}
+
 async function handleShutdown(): Promise<void> {
     try {
+        for (const t of faultClearTimers.values()) clearTimeout(t);
+        faultClearTimers.clear();
         if (transactionManager) transactionManager.cleanup();
         if (chargePoint) chargePoint.disconnect();
     } catch (err) {
@@ -257,6 +289,15 @@ port.on('message', (raw: unknown) => {
         case 'set_dc_profile':
             transactionManager?.setDCProfile(1, msg.profile);
             transactionManager?.setDCProfile(2, msg.profile);
+            break;
+        case 'fault':
+            void handleFault(msg);
+            break;
+        case 'ping':
+            // Reply on the same nonce so the supervisor can correlate.
+            // The reply itself is the heartbeat — supervisor doesn't
+            // care about value, only liveness.
+            send({ type: 'pong', nonce: msg.nonce });
             break;
         case 'shutdown':
             void handleShutdown();

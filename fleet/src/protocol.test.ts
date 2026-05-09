@@ -14,6 +14,9 @@ describe('protocol — type guards', () => {
             { type: 'emergency_stop', connector_id: 1 },
             { type: 'set_phase_mode', mode: 'balanced' },
             { type: 'set_dc_profile', profile: { capacity_kwh: 60 } },
+            { type: 'fault', connector_id: 1 },
+            { type: 'fault', connector_id: 1, clear_after_seconds: 5 },
+            { type: 'ping', nonce: 42 },
             { type: 'shutdown' },
         ];
         for (const m of samples) assert.ok(isDownMessage(m), `expected pass: ${JSON.stringify(m)}`);
@@ -30,6 +33,7 @@ describe('protocol — type guards', () => {
             { type: 'meter_tick', connector_id: 1, power_kw: 50, energy_kwh: 0.7, soc_pct: 22 },
             { type: 'connector_status', connector_id: 1, status: 'Charging' },
             { type: 'error', level: 'warn', message: 'flaky network' },
+            { type: 'pong', nonce: 42 },
         ];
         for (const m of samples) assert.ok(isUpMessage(m), `expected pass: ${JSON.stringify(m)}`);
     });

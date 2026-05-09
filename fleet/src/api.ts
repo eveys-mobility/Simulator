@@ -206,6 +206,21 @@ export function createFleetRouter(args: {
         sendOrFail(req.params.cp_id, { type: 'emergency_stop', connector_id }, res);
     });
 
+    // Fault injection — sends a Faulted StatusNotification on a
+    // specific connector. `clear_after_seconds` (optional) auto-
+    // clears via an Available notification on the worker side. Used
+    // for testing CSMS fault handling without crashing workers.
+    router.post('/cps/:cp_id/actions/fault', (req: Request, res: Response) => {
+        const { connector_id, clear_after_seconds } = req.body ?? {};
+        if (typeof connector_id !== 'number') {
+            return res.status(400).json({ success: false, error: 'connector_id (number) required' });
+        }
+        if (clear_after_seconds !== undefined && (typeof clear_after_seconds !== 'number' || clear_after_seconds <= 0)) {
+            return res.status(400).json({ success: false, error: 'clear_after_seconds must be a positive number if provided' });
+        }
+        sendOrFail(req.params.cp_id, { type: 'fault', connector_id, clear_after_seconds }, res);
+    });
+
     // ---- groups ----
 
     router.get('/groups', (_req: Request, res: Response) => {
