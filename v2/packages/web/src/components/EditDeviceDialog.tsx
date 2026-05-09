@@ -210,7 +210,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: Props) {
                     )}
 
                     {respawnPending.length > 0 && (
-                        <div className="flex items-start gap-2 rounded-md border border-brand-gold/40 bg-brand-gold/10 p-3 text-sm text-brand-gold">
+                        <div className="flex items-start gap-2 rounded-md border border-brand-orange/40 bg-brand-orange/10 p-3 text-sm text-brand-orange">
                             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                             <div>
                                 Saving will reconnect the simulator: <span className="font-medium">{respawnPending.join(', ')}</span> changed. The device will briefly go offline and re-announce to the gateway.

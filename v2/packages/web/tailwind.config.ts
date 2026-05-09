@@ -37,11 +37,12 @@ const config: Config = {
                     foreground: 'hsl(var(--card-foreground))',
                 },
                 brand: {
-                    navy: 'hsl(var(--brand-navy))',
+                    orange: 'hsl(var(--brand-orange))',
+                    slate: 'hsl(var(--brand-slate))',
+                    cloud: 'hsl(var(--brand-cloud))',
+                    green: 'hsl(var(--brand-green))',
                     blue: 'hsl(var(--brand-blue))',
-                    gold: 'hsl(var(--brand-gold))',
-                    cream: 'hsl(var(--brand-cream))',
-                    coal: 'hsl(var(--brand-coal))',
+                    red: 'hsl(var(--brand-red))',
                 },
             },
             borderRadius: {

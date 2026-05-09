@@ -1,8 +1,7 @@
 @import '@fontsource-variable/inter/index.css';
 /*
- * Clash Display is hosted by the foundry — pulled in via the official
- * fontshare embed so we don't have to license-redistribute a font
- * binary into the repo. Falls back to system serifs gracefully.
+ * Clash Display from the foundry. The eveys.com site uses Clash for
+ * display type (sampled from /assets/index-814c4624.css).
  */
 @import url('https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap');
 
@@ -11,73 +10,82 @@
 @tailwind utilities;
 
 /*
- * Brand palette — anchored on the Eveys site (eveys.com).
- *  Navy   #0a102f   primary surface
- *  Blue   #3147ff   accent / CTA
- *  Gold   #f4b905   secondary accent
- *  Cream  #fff4d9   muted highlight
- *  Off-w  #fdfbf9   foreground on dark
- *  Coal   #221f1a   near-black for borders / text on light
+ * Eveys brand palette — derived from the official OG image at
+ * https://eveys.com/image/og-image.png by ranking pixel area, with
+ * the wordmark color confirmed against /image/icons/brand.svg
+ * (#1A282F).
  *
- * Stored as HSL components (no `hsl(...)` wrapper) so Tailwind utilities
- * can compose alpha modifiers — `bg-primary/40` etc.
+ *   orange #F04E1F   65.4% of OG creative — primary brand voice
+ *   cloud  #F4F4F4   25.2% — light surfaces / dashboard panels
+ *   slate  #1A282F   2.2% — logo + text on light
+ *   green  #22C55E   charging-active state
+ *   blue   #1080F0   chart/data accent (low-frequency)
+ *   red    #F02050   destructive accent (low-frequency)
+ *
+ * Stored as HSL components (no `hsl(...)` wrapper) so Tailwind's
+ * `bg-primary/40` alpha-modifier syntax works.
  */
 @layer base {
     :root {
-        /* Light theme — for completeness; the app currently runs dark by default. */
-        --background: 36 50% 98%;
-        --foreground: 228 65% 11%;
-        --card: 0 0% 100%;
-        --card-foreground: 228 65% 11%;
+        /* Light theme — for completeness; the operator UI defaults to dark. */
+        --background: 0 0% 100%;
+        --foreground: 204 30% 14%;
+        --card: 0 0% 96%;
+        --card-foreground: 204 30% 14%;
         --popover: 0 0% 100%;
-        --popover-foreground: 228 65% 11%;
-        --primary: 234 100% 60%;
+        --popover-foreground: 204 30% 14%;
+        --primary: 13 88% 53%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 46 100% 92%;
-        --secondary-foreground: 228 65% 11%;
-        --muted: 36 30% 94%;
-        --muted-foreground: 228 30% 35%;
-        --accent: 46 95% 49%;
-        --accent-foreground: 228 65% 11%;
-        --destructive: 0 70% 52%;
+        --secondary: 0 0% 96%;
+        --secondary-foreground: 204 30% 14%;
+        --muted: 0 0% 94%;
+        --muted-foreground: 204 15% 35%;
+        --accent: 142 71% 45%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 348 88% 53%;
         --destructive-foreground: 0 0% 100%;
-        --border: 36 20% 88%;
-        --input: 36 20% 88%;
-        --ring: 234 100% 60%;
+        --border: 0 0% 90%;
+        --input: 0 0% 90%;
+        --ring: 13 88% 53%;
         --radius: 0.625rem;
 
-        --brand-navy: 228 65% 11%;
-        --brand-blue: 234 100% 60%;
-        --brand-gold: 46 95% 49%;
-        --brand-cream: 46 100% 92%;
-        --brand-coal: 33 14% 12%;
+        --brand-orange: 13 88% 53%;
+        --brand-slate: 204 30% 14%;
+        --brand-cloud: 0 0% 96%;
+        --brand-green: 142 71% 45%;
+        --brand-blue: 211 88% 50%;
+        --brand-red: 348 88% 53%;
     }
 
-    /* Dark theme — the simulator's default. Built on the navy base
-     * so the gateway-style monitoring feel is preserved while the
-     * accents come straight from the brand. */
-    .dark,
-    :root[data-theme='dark'],
-    :root {
-        --background: 228 65% 7%;            /* deeper than navy for canvas */
-        --foreground: 36 50% 98%;
-        --card: 228 50% 11%;                 /* navy proper */
-        --card-foreground: 36 50% 98%;
-        --popover: 228 50% 11%;
-        --popover-foreground: 36 50% 98%;
-        --primary: 234 100% 65%;             /* brand blue, slightly lifted for dark bg */
-        --primary-foreground: 228 65% 7%;
-        --secondary: 228 40% 18%;
-        --secondary-foreground: 36 50% 98%;
-        --muted: 228 35% 16%;
-        --muted-foreground: 228 20% 65%;
-        --accent: 46 95% 55%;                /* brand gold */
-        --accent-foreground: 228 65% 7%;
-        --destructive: 0 70% 55%;
-        --destructive-foreground: 36 50% 98%;
-        --border: 228 35% 20%;
-        --input: 228 35% 20%;
-        --ring: 234 100% 65%;
+    /*
+     * Dark theme — applied when `html.dark` is set (Tailwind class
+     * strategy). The mode picker writes that class based on the user
+     * choice (or `prefers-color-scheme` for system).
+     *
+     * Sits on the brand slate, orange as primary accent so the brand
+     * voice still carries. Charging-green for active states matches
+     * the OG image's "3.05 kwt" pill.
+     */
+    .dark {
+        --background: 204 30% 9%;            /* deeper than the slate logo for canvas contrast */
+        --foreground: 0 0% 96%;
+        --card: 204 30% 14%;                 /* the brand slate proper */
+        --card-foreground: 0 0% 96%;
+        --popover: 204 30% 14%;
+        --popover-foreground: 0 0% 96%;
+        --primary: 13 88% 58%;               /* brand orange, lifted ~5% for dark-bg legibility */
+        --primary-foreground: 0 0% 100%;
+        --secondary: 204 25% 19%;
+        --secondary-foreground: 0 0% 96%;
+        --muted: 204 22% 17%;
+        --muted-foreground: 204 12% 65%;
+        --accent: 142 71% 50%;               /* charging-active green */
+        --accent-foreground: 204 30% 9%;
+        --destructive: 348 88% 58%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 204 22% 22%;
+        --input: 204 22% 22%;
+        --ring: 13 88% 58%;
     }
 
     body {
@@ -92,8 +100,6 @@
         letter-spacing: -0.01em;
     }
 
-    /* Use tabular numerals for any number we expect to scrub —
-     * power, energy, latency, kWh. Keeps columns from shifting. */
     .tabular-nums {
         font-variant-numeric: tabular-nums;
     }
