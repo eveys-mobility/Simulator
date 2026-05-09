@@ -7,14 +7,35 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 import ConfigurationPanel from './components/ConfigurationPanel';
 import { ManualConsumption } from './components/ManualConsumption';
 import { ConnectorEditor } from './components/ConnectorEditor';
+import { FleetPage } from './pages/Fleet/FleetPage';
 import { api, ChargingSession, ConnectorState, PhaseMode } from './services/api';
-import { Wifi, WifiOff, Settings } from 'lucide-react';
+import { Wifi, WifiOff, Settings, Server } from 'lucide-react';
 import './index.css';
 
 interface LogEntry {
     timestamp: Date;
     direction: 'incoming' | 'outgoing';
     data: any;
+}
+
+// Cheap, dependency-free routing: read `window.location.pathname`
+// once and decide which top-level page to render. The single-CP UI
+// already exists at `/`; the fleet admin page is under `/fleet`.
+// Anything else falls through to the single-CP UI (so 404-ish paths
+// stay friendly during dev).
+function isFleetRoute(): boolean {
+    if (typeof window === 'undefined') return false;
+    return window.location.pathname.startsWith('/fleet');
+}
+
+// Spec resolved-question #2: deep-link from /fleet → single-CP via
+// `?cp=<cp_id>`. The full reuse-existing-UI-against-fleet-pubsub
+// change is out of MR-G scope; here we read the param so we can
+// surface a banner explaining what the viewer is connected to.
+function deepLinkedCpId(): string | null {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('cp');
 }
 
 function App() {
@@ -27,11 +48,19 @@ function App() {
     const [notification, setNotification] = useState<string | null>(null);
     const [connecting, setConnecting] = useState(false);
     const [activeTab, setActiveTab] = useState<'simulator' | 'configuration'>('simulator');
+    const [fleetRoute] = useState<boolean>(isFleetRoute);
+    const [deepLinkedCp] = useState<string | null>(deepLinkedCpId);
 
     const sessionFor = (connectorId: number): ChargingSession | null =>
         sessions.find(s => s.connectorId === connectorId) ?? null;
 
     useEffect(() => {
+        // Skip the single-CP backend chatter when we're rendering the
+        // fleet page. Saves a 5 s timer + a WS that 404s when the
+        // single-CP backend on :3001 isn't running (common in fleet-
+        // only sessions).
+        if (fleetRoute) return;
+
         // Initial status fetch
         fetchStatus();
 
@@ -189,9 +218,33 @@ function App() {
                     />
                     <div style={{ borderLeft: '2px solid rgba(255,255,255,0.3)', height: '48px' }}></div>
                     <div>
-                        <h1 style={{ margin: 0, fontSize: '1.8rem' }}>Charge Point Simulator</h1>
-                        <p style={{ margin: 0, fontSize: '0.9rem', opacity: 0.9 }}>22kW AC Charging Station - OCPP 1.6J Protocol</p>
+                        <h1 style={{ margin: 0, fontSize: '1.8rem' }}>
+                            {fleetRoute ? 'Fleet Admin' : 'Charge Point Simulator'}
+                        </h1>
+                        <p style={{ margin: 0, fontSize: '0.9rem', opacity: 0.9 }}>
+                            {fleetRoute
+                                ? 'Multi-CP fleet runtime — groups, load balancing, sessions'
+                                : '22kW AC Charging Station - OCPP 1.6J Protocol'}
+                        </p>
                     </div>
+                    <a
+                        href={fleetRoute ? '/' : '/fleet'}
+                        style={{
+                            marginLeft: '1rem',
+                            color: 'white',
+                            textDecoration: 'none',
+                            padding: '0.4rem 0.75rem',
+                            borderRadius: '4px',
+                            background: 'rgba(255,255,255,0.15)',
+                            fontSize: '0.85rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                        }}
+                    >
+                        <Server size={16} />
+                        {fleetRoute ? 'Single CP' : 'Fleet'}
+                    </a>
                 </div>
             </div>
 
@@ -203,6 +256,17 @@ function App() {
                     </div>
                 )}
 
+                {fleetRoute ? (
+                    <FleetPage onNotify={showNotification} />
+                ) : (
+                <>
+                {deepLinkedCp && (
+                    <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+                        <strong>Deep-linked from fleet:</strong> <code>{deepLinkedCp}</code>.
+                        This view shows the local single-CP backend on :3001 (whatever cp_id it was booted with).
+                        Fleet-wide per-CP detail is a follow-up — for now, use the fleet page for cross-CP visibility.
+                    </div>
+                )}
                 <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                         <button
@@ -308,6 +372,8 @@ function App() {
                     </>
                 ) : (
                     <ConfigurationPanel />
+                )}
+                </>
                 )}
             </div>
         </div>
