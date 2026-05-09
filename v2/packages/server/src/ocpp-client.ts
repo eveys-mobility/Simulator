@@ -32,6 +32,25 @@ interface PendingCall {
 }
 
 const CALL_TIMEOUT_MS = 30_000;
+/** OCPP allows any positive integer, but a CSMS that returns 0 or 1
+ *  would have us hammering Heartbeats forever. Real deployments are
+ *  60–900 seconds; clamp inside that window so a misconfigured CSMS
+ *  can't push us out of safe territory. */
+const HEARTBEAT_MIN_SEC = 30;
+const HEARTBEAT_MAX_SEC = 86_400; // 24h — anything beyond is effectively never
+const HEARTBEAT_DEFAULT_SEC = 300;
+
+function clampHeartbeat(raw: number, label: string): number {
+    if (!Number.isFinite(raw) || raw <= 0) return HEARTBEAT_DEFAULT_SEC;
+    if (raw < HEARTBEAT_MIN_SEC) {
+        console.warn(
+            `[ocpp] ${label} heartbeat ${raw}s below ${HEARTBEAT_MIN_SEC}s floor; clamping`,
+        );
+        return HEARTBEAT_MIN_SEC;
+    }
+    if (raw > HEARTBEAT_MAX_SEC) return HEARTBEAT_MAX_SEC;
+    return raw;
+}
 
 export interface OcppClientOptions {
     /**
@@ -95,10 +114,11 @@ export class OcppClient extends EventEmitter {
 
     /** Update the heartbeat cadence. Used when the CSMS issues a
      *  ChangeConfiguration for HeartbeatInterval. Idempotent — restarts
-     *  the interval timer at the new cadence. */
+     *  the interval timer at the new cadence. Values are clamped to a
+     *  safe window (see HEARTBEAT_MIN/MAX_SEC). */
     setHeartbeatIntervalSec(seconds: number): void {
         if (!Number.isFinite(seconds) || seconds <= 0) return;
-        this.heartbeatIntervalSec = seconds;
+        this.heartbeatIntervalSec = clampHeartbeat(seconds, this.device.id);
         if (this.heartbeat) {
             clearInterval(this.heartbeat);
             this.startHeartbeat();
@@ -328,7 +348,7 @@ export class OcppClient extends EventEmitter {
             return;
         }
         this.bootDeferred = false;
-        this.heartbeatIntervalSec = res.interval > 0 ? res.interval : 300;
+        this.heartbeatIntervalSec = clampHeartbeat(res.interval, this.device.id);
         this.emit('booted', res);
     }
 
