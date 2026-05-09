@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, LayoutGrid, List, Plus, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Search, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LiveDot } from '@/components/LiveDot';
 import { Badge } from '@/components/ui/badge';
@@ -23,8 +23,12 @@ import type { DeviceType } from '@ocpp-sim/core';
 type Layout = 'grid' | 'table';
 type StatusFilter = 'all' | 'online' | 'offline';
 type TypeFilter = 'all' | 'AC' | 'DC';
+type ConnectorFilter = 'all' | 'Charging' | 'Available' | 'Faulted' | 'Other';
 
 const LAYOUT_KEY = 'ocpp-sim-devices-layout';
+const PAGE_SIZE_KEY = 'ocpp-sim-devices-pagesize';
+const PAGE_SIZES = [12, 24, 48, 96] as const;
+const DEFAULT_PAGE_SIZE = 24;
 
 export function DevicesPage() {
     const { data: devices = [], isLoading } = useQuery({
@@ -49,6 +53,20 @@ export function DevicesPage() {
 
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+    const [connectorFilter, setConnectorFilter] = useState<ConnectorFilter>('all');
+    const [search, setSearch] = useState('');
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState<number>(() => {
+        if (typeof window === 'undefined') return DEFAULT_PAGE_SIZE;
+        const saved = Number(window.localStorage.getItem(PAGE_SIZE_KEY));
+        return (PAGE_SIZES as readonly number[]).includes(saved) ? saved : DEFAULT_PAGE_SIZE;
+    });
+    const setPageSizePersisted = (n: number) => {
+        setPageSize(n);
+        try {
+            window.localStorage.setItem(PAGE_SIZE_KEY, String(n));
+        } catch {}
+    };
 
     const create = useMutation({
         mutationFn: api.createDevice,
@@ -64,14 +82,40 @@ export function DevicesPage() {
     /** Live-aware filter: an `online` change in WebSocket can flip a row's
      *  visibility immediately even if TanStack Query hasn't refetched yet. */
     const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
         return devices.filter((d) => {
             if (typeFilter !== 'all' && d.type !== typeFilter) return false;
             const online = onlineMap.get(d.id) ?? d.online;
             if (statusFilter === 'online' && !online) return false;
             if (statusFilter === 'offline' && online) return false;
+            if (q && !d.displayName.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) {
+                return false;
+            }
+            if (connectorFilter !== 'all') {
+                const matches = d.connectors.some((c) => {
+                    const status = connectorStatus.get(liveKey(d.id, c.id)) ?? c.status;
+                    if (connectorFilter === 'Other') {
+                        return status !== 'Charging' && status !== 'Available' && status !== 'Faulted';
+                    }
+                    return status === connectorFilter;
+                });
+                if (!matches) return false;
+            }
             return true;
         });
-    }, [devices, statusFilter, typeFilter, onlineMap]);
+    }, [devices, statusFilter, typeFilter, connectorFilter, search, onlineMap, connectorStatus]);
+
+    // Pagination clamp + reset-to-first-page on filter changes.
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    useEffect(() => {
+        if (page > totalPages - 1) setPage(0);
+    }, [page, totalPages]);
+    useEffect(() => {
+        setPage(0);
+    }, [statusFilter, typeFilter, connectorFilter, search, pageSize]);
+
+    const offset = page * pageSize;
+    const paged = filtered.slice(offset, offset + pageSize);
 
     return (
         <div className="space-y-6">
@@ -96,9 +140,20 @@ export function DevicesPage() {
             <Card>
                 <CardContent className="p-3 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-3 flex-wrap">
+                        <FilterField label="Search">
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                <Input
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="name or id…"
+                                    className="h-8 w-48 pl-7 text-xs"
+                                />
+                            </div>
+                        </FilterField>
                         <FilterField label="Type">
                             <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
-                                <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
                                     <SelectItem value="AC">AC</SelectItem>
@@ -116,9 +171,38 @@ export function DevicesPage() {
                                 </SelectContent>
                             </Select>
                         </FilterField>
+                        <FilterField label="Connector">
+                            <Select
+                                value={connectorFilter}
+                                onValueChange={(v) => setConnectorFilter(v as ConnectorFilter)}
+                            >
+                                <SelectTrigger className="h-8 w-32 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All</SelectItem>
+                                    <SelectItem value="Charging">Charging</SelectItem>
+                                    <SelectItem value="Available">Available</SelectItem>
+                                    <SelectItem value="Faulted">Faulted</SelectItem>
+                                    <SelectItem value="Other">Other</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </FilterField>
+                        <FilterField label="Per page">
+                            <Select
+                                value={String(pageSize)}
+                                onValueChange={(v) => setPageSizePersisted(Number(v))}
+                            >
+                                <SelectTrigger className="h-8 w-20 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {PAGE_SIZES.map((n) => (
+                                        <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </FilterField>
                         <span className="text-xs text-muted-foreground">
-                            {filtered.length}
-                            {filtered.length !== devices.length && ` of ${devices.length}`}
+                            {filtered.length === devices.length
+                                ? `${devices.length} device${devices.length === 1 ? '' : 's'}`
+                                : `${filtered.length} of ${devices.length}`}
                         </span>
                     </div>
                     <div className="inline-flex rounded-md border bg-secondary/30 p-0.5">
@@ -164,7 +248,7 @@ export function DevicesPage() {
                 </Card>
             ) : layout === 'grid' ? (
                 <GridView
-                    devices={filtered}
+                    devices={paged}
                     onlineMap={onlineMap}
                     connectorStatus={connectorStatus}
                     onDelete={(d) => {
@@ -174,7 +258,7 @@ export function DevicesPage() {
                 />
             ) : (
                 <TableView
-                    devices={filtered}
+                    devices={paged}
                     onlineMap={onlineMap}
                     connectorStatus={connectorStatus}
                     onDelete={(d) => {
@@ -182,6 +266,32 @@ export function DevicesPage() {
                     }}
                     deleting={remove.isPending}
                 />
+            )}
+
+            {totalPages > 1 && (
+                <div className="flex items-center justify-end gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                    </Button>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                        {offset + 1}–{Math.min(offset + paged.length, filtered.length)} of {filtered.length}
+                        <span className="mx-2 text-muted-foreground/60">·</span>
+                        Page {page + 1} of {totalPages}
+                    </span>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={page >= totalPages - 1}
+                    >
+                        Next <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                </div>
             )}
         </div>
     );
