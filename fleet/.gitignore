@@ -2,5 +2,10 @@
 # inside each worker. The single-CP backend has its own data/ ignore at
 # backend/.gitignore; we mirror it here because workers pwd at the
 # fleet root and write their per-cp_id JSON files in fleet/data/.
-# SQLite-backed equivalents land in MR-E.
 data/
+
+# SQLite snapshot — runtime, never committed.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

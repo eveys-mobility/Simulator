@@ -15,6 +15,7 @@ import {
     PhaseMode,
     DCBatteryProfile,
 } from './protocol';
+import { FleetStore } from './sqlite';
 
 export interface SpawnSpec {
     cp_id: string;
@@ -51,10 +52,20 @@ export class WorkerSupervisor {
     private listeners: Set<(cp_id: string, msg: UpMessage) => void> = new Set();
     private workerPath: string;
     private registry: Registry;
+    private store?: FleetStore;
     private shuttingDown = false;
+    /** Map (cp_id, connector_id) → sessions.id for the currently-open
+     *  session row. Lets session_ended write the right row without an
+     *  extra SELECT. Cleared on session_ended. */
+    private sessionDbIds: Map<string, number> = new Map();
+    /** Per-session running peak power, watched on each meter_tick so
+     *  the persisted peak_power_kw column is the actual peak rather
+     *  than the last instantaneous reading. */
+    private sessionPeaks: Map<string, number> = new Map();
 
-    constructor(args: { registry: Registry; workerPath?: string }) {
+    constructor(args: { registry: Registry; workerPath?: string; store?: FleetStore }) {
         this.registry = args.registry;
+        this.store = args.store;
         // worker_threads spawns a fresh node, no loader hooks inherited.
         // In dev (`npm run dev`) we run TS through tsx's CJS hook via a
         // tiny .cjs shim. In prod (`npm run build` then `start`) we point
@@ -217,11 +228,37 @@ export class WorkerSupervisor {
                 this.registry.patch(cpId, {
                     active_sessions: { [msg.connector_id]: msg.transaction_id },
                 });
+                if (this.store) {
+                    const sessionDbId = this.store.insertSession({
+                        cp_id: cpId,
+                        connector_id: msg.connector_id,
+                        id_tag: msg.id_tag,
+                        started_at: new Date().toISOString(),
+                    });
+                    this.sessionDbIds.set(this.sessionKey(cpId, msg.connector_id), sessionDbId);
+                    this.sessionPeaks.set(this.sessionKey(cpId, msg.connector_id), 0);
+                }
                 break;
             case 'session_ended':
                 this.registry.patch(cpId, {
                     active_sessions: { [msg.connector_id]: null },
                 });
+                if (this.store) {
+                    const key = this.sessionKey(cpId, msg.connector_id);
+                    const sessionDbId = this.sessionDbIds.get(key);
+                    const peak = this.sessionPeaks.get(key) ?? msg.peak_power_kw;
+                    if (sessionDbId !== undefined) {
+                        this.store.endSession({
+                            id: sessionDbId,
+                            ended_at: new Date().toISOString(),
+                            end_reason: msg.reason,
+                            energy_wh: msg.energy_wh,
+                            peak_power_kw: peak,
+                        });
+                        this.sessionDbIds.delete(key);
+                        this.sessionPeaks.delete(key);
+                    }
+                }
                 break;
             case 'meter_tick':
                 this.registry.patch(cpId, {
@@ -233,11 +270,26 @@ export class WorkerSupervisor {
                         },
                     },
                 });
+                {
+                    // Track the running peak per session so the persisted
+                    // `peak_power_kw` column reflects the high-water
+                    // mark, not the last sample (which can be near zero
+                    // during the Finishing tail).
+                    const key = this.sessionKey(cpId, msg.connector_id);
+                    const prev = this.sessionPeaks.get(key);
+                    if (prev !== undefined && msg.power_kw > prev) {
+                        this.sessionPeaks.set(key, msg.power_kw);
+                    }
+                }
                 break;
             case 'error':
                 console[msg.level === 'error' ? 'error' : 'warn'](`[worker:${cpId}] ${msg.message}`);
                 break;
             // 'ready' already handled above.
         }
+    }
+
+    private sessionKey(cpId: string, connectorId: number): string {
+        return `${cpId}:${connectorId}`;
     }
 }
