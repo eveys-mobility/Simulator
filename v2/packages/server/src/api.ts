@@ -24,6 +24,9 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
     await app.register(cors, { origin: true });
     await app.register(websocket);
 
+    // Mutable so the Settings PUT can update what new devices default to.
+    let currentDefaultOcppUrl = defaultOcppUrl;
+
     // ---- DEVICES ----
 
     const CreateDeviceBody = z.object({
@@ -53,7 +56,7 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             vendor: 'Eveys',
             firmwareVersion: '1.0.0',
             maxPowerKw: body.data.maxPowerKw ?? defaults.maxPowerKw,
-            ocppUrl: body.data.ocppUrl ?? defaultOcppUrl,
+            ocppUrl: body.data.ocppUrl ?? currentDefaultOcppUrl,
             phaseMode: body.data.phaseMode ?? 'balanced',
             dcProfile:
                 body.data.type === 'DC'
@@ -381,6 +384,28 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
     });
 
     app.get('/api/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+    // ---- APP SETTINGS ----
+    //
+    // App-wide preferences that aren't tied to a single device. Today
+    // just the default OCPP gateway URL — when the user creates a new
+    // device without specifying ocppUrl, it gets this value.
+
+    app.get('/api/settings', async () => ({
+        defaultOcppUrl: currentDefaultOcppUrl,
+    }));
+
+    const SettingsBody = z.object({
+        defaultOcppUrl: z.string().url(),
+    });
+
+    app.put('/api/settings', async (req, reply) => {
+        const body = SettingsBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        currentDefaultOcppUrl = body.data.defaultOcppUrl;
+        store.setSetting('default_ocpp_url', currentDefaultOcppUrl);
+        return { defaultOcppUrl: currentDefaultOcppUrl };
+    });
 
     return app;
 }

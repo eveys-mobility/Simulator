@@ -66,6 +66,10 @@ export const api = {
     reboot: (deviceId: string, type: 'Soft' | 'Hard') =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/reboot`, { type }),
 
+    getSettings: () => http<{ defaultOcppUrl: string }>('GET', '/settings'),
+    updateSettings: (body: { defaultOcppUrl: string }) =>
+        http<{ defaultOcppUrl: string }>('PUT', '/settings', body),
+
     listSessions: (q: { status?: 'active' | 'completed' | 'aborted'; deviceId?: string; limit?: number } = {}) => {
         const params = new URLSearchParams();
         if (q.status) params.set('status', q.status);
