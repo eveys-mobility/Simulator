@@ -419,6 +419,16 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         }
     });
 
+    /**
+     * List installed SmartCharging profiles for a device. Read-only;
+     * profile install/clear is CSMS-driven by design.
+     */
+    app.get<{ Params: { id: string } }>('/api/devices/:id/charging-profiles', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        return store.listChargingProfiles(req.params.id);
+    });
+
     app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reboot', async (req, reply) => {
         const body = RebootBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: body.error.message });

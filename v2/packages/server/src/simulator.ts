@@ -1,10 +1,17 @@
 import { EventEmitter } from 'node:events';
 import {
+    type ChargingProfile,
+    ChargingProfileSchema,
+    ClearChargingProfileReqSchema,
     type ConnectorStatus,
     DEFAULT_AC_WIRING,
     DEFAULT_DC_PROFILE,
     type Device,
+    GetCompositeScheduleReqSchema,
     type MeterTick,
+    SetChargingProfileReqSchema,
+    composeSchedule,
+    resolveActiveLimit,
     sim,
 } from '@ocpp-sim/core';
 import {
@@ -38,6 +45,29 @@ interface ConnectorState {
     /** Pending fault auto-clear timer (set when a fault was injected
      *  with `clear_after_seconds`). Cleared on manual clear or shutdown. */
     faultClearTimer: NodeJS.Timeout | null;
+}
+
+/**
+ * Recompute a DC measurand set after a SmartCharging cap reduced the
+ * frame's powerW. The SoC curve already gave us voltage and SoC; the
+ * cap only changes the realized power, current, and (over time) the
+ * energy delta. Lives at module scope so it can be tested separately
+ * if we ever need to.
+ */
+function recomputeDcMeasurands(
+    energyWh: number,
+    powerW: number,
+    voltageV: number,
+    socPct: number,
+): sim.SampledValue[] {
+    const currentA = voltageV > 0 ? powerW / voltageV : 0;
+    return [
+        { measurand: 'Energy.Active.Import.Register', value: String(Math.round(energyWh)), unit: 'Wh', location: 'Outlet' },
+        { measurand: 'Power.Active.Import', value: String(Math.round(powerW)), unit: 'W', location: 'Outlet' },
+        { measurand: 'Voltage', value: voltageV.toFixed(1), unit: 'V' },
+        { measurand: 'Current.Import', value: currentA.toFixed(2), unit: 'A' },
+        { measurand: 'SoC', value: socPct.toFixed(1), unit: 'Percent', location: 'EV' },
+    ];
 }
 
 /**
@@ -492,9 +522,106 @@ export class Simulator extends EventEmitter {
                 // feature later in the roadmap.
                 return { ok: true, result: { status: 'Accepted' } };
 
+            case 'SetChargingProfile':
+                return { ok: true, result: { status: this.handleSetChargingProfile(p) } };
+
+            case 'ClearChargingProfile':
+                return { ok: true, result: { status: this.handleClearChargingProfile(p) } };
+
+            case 'GetCompositeSchedule':
+                return { ok: true, result: this.handleGetCompositeSchedule(p) };
+
             default:
                 return { ok: false, code: 'NotImplemented', description: `${action} is not implemented` };
         }
+    }
+
+    private handleSetChargingProfile(p: Record<string, unknown>): 'Accepted' | 'Rejected' | 'NotSupported' {
+        const parsed = SetChargingProfileReqSchema.safeParse(p);
+        if (!parsed.success) return 'Rejected';
+        const { connectorId, csChargingProfiles: profile } = parsed.data;
+        // OCPP §6.31: ChargePointMaxProfile must target connectorId=0
+        // (whole device); the others target a specific connector.
+        if (profile.chargingProfilePurpose === 'ChargePointMaxProfile' && connectorId !== 0) {
+            return 'Rejected';
+        }
+        if (
+            profile.chargingProfilePurpose !== 'ChargePointMaxProfile' &&
+            !this.connectors.has(connectorId)
+        ) {
+            return 'Rejected';
+        }
+        this.store.setChargingProfile(this.device.id, connectorId, profile);
+        return 'Accepted';
+    }
+
+    private handleClearChargingProfile(p: Record<string, unknown>): 'Accepted' | 'Unknown' {
+        const parsed = ClearChargingProfileReqSchema.safeParse(p);
+        if (!parsed.success) return 'Unknown';
+        const removed = this.store.clearChargingProfiles(this.device.id, parsed.data);
+        return removed > 0 ? 'Accepted' : 'Unknown';
+    }
+
+    private handleGetCompositeSchedule(p: Record<string, unknown>): {
+        status: 'Accepted' | 'Rejected';
+        connectorId?: number;
+        scheduleStart?: string;
+        chargingSchedule?: ReturnType<typeof composeSchedule>;
+    } {
+        const parsed = GetCompositeScheduleReqSchema.safeParse(p);
+        if (!parsed.success) return { status: 'Rejected' };
+        const { connectorId, duration, chargingRateUnit } = parsed.data;
+        if (connectorId !== 0 && !this.connectors.has(connectorId)) {
+            return { status: 'Rejected' };
+        }
+        const profiles = this.profilesFor(connectorId).map((p) => p.profile);
+        const conn = connectorId !== 0 ? this.connectors.get(connectorId) : undefined;
+        const startMs = Date.now();
+        const schedule = composeSchedule({
+            profiles,
+            startMs,
+            durationSeconds: duration,
+            unit: chargingRateUnit ?? 'W',
+            transactionId: conn?.transactionId ?? null,
+            sessionStartMs: conn?.startedAtMs,
+        });
+        return {
+            status: 'Accepted',
+            connectorId,
+            scheduleStart: new Date(startMs).toISOString(),
+            chargingSchedule: schedule,
+        };
+    }
+
+    /**
+     * Profiles eligible for `connectorId`. Includes the profiles
+     * stored on this connector plus any ChargePointMaxProfile rows
+     * (which the CSMS sets on connectorId=0 but apply to every one).
+     */
+    private profilesFor(connectorId: number): { connectorId: number; profile: ChargingProfile }[] {
+        const all = this.store.listChargingProfiles(this.device.id);
+        return all.filter(
+            (r) =>
+                r.connectorId === connectorId ||
+                (r.profile.chargingProfilePurpose === 'ChargePointMaxProfile' && r.connectorId === 0),
+        );
+    }
+
+    /**
+     * Active SmartCharging cap for a connector right now, in watts.
+     * Returns null when nothing constrains the rate.
+     */
+    private activeChargingLimitW(connectorId: number): number | null {
+        const conn = this.connectors.get(connectorId);
+        const profiles = this.profilesFor(connectorId).map((p) => p.profile);
+        if (profiles.length === 0) return null;
+        const r = resolveActiveLimit({
+            profiles,
+            now: Date.now(),
+            transactionId: conn?.transactionId ?? null,
+            sessionStartMs: conn?.startedAtMs,
+        });
+        return r.limitW;
     }
 
     private async handleRemoteStart(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected'> {
@@ -692,25 +819,33 @@ export class Simulator extends EventEmitter {
         let socPct: number | undefined;
         let measurands: sim.SampledValue[] = [];
 
+        // SmartCharging cap, if any. Applied uniformly across AC and
+        // DC paths — a profile that limits to 5 kW caps a 22 kW AC EVSE
+        // and a 100 kW DC charger to 5 kW alike.
+        const capW = this.activeChargingLimitW(connectorId);
+
         if (this.device.type === 'DC') {
             const profile = this.device.dcProfile ?? DEFAULT_DC_PROFILE;
             const r = sim.computeDcMeasurands({ profile, elapsedSec: t, energyWh: c.energyWh });
-            powerW = r.frame.powerW;
+            powerW = capW !== null ? Math.min(r.frame.powerW, capW) : r.frame.powerW;
             socPct = r.frame.socPct;
-            measurands = r.measurands;
+            // If the cap reduced the power, re-emit measurands at the new
+            // value so per-phase / SoC numbers stay consistent.
+            measurands = capW !== null && powerW < r.frame.powerW
+                ? recomputeDcMeasurands(c.energyWh, powerW, r.frame.voltageV, r.frame.socPct)
+                : r.measurands;
             if (r.frame.completed) {
-                // Battery full → end session automatically.
                 this.stopSession(connectorId, 'Local').catch((e) => this.emit('error', e));
                 return;
             }
         } else {
             const wiring = this.device.acWiring ?? DEFAULT_AC_WIRING;
-            // Pre-compute totals for the energy/peak accounting.
-            const f = sim.computePhaseFrame(this.device.maxPowerKw, this.device.phaseMode);
-            powerW = f.totalKw * 1000;
+            const rawPowerW = this.device.maxPowerKw * 1000;
+            const totalKw = (capW !== null ? Math.min(rawPowerW, capW) : rawPowerW) / 1000;
+            powerW = totalKw * 1000;
             measurands = sim.computeAcMeasurands({
-                totalPowerKw: f.totalKw,
-                energyWh: c.energyWh + powerW / 3600, // include this tick's Wh in the published total
+                totalPowerKw: totalKw,
+                energyWh: c.energyWh + powerW / 3600,
                 phaseMode: this.device.phaseMode,
                 wiring,
             });
