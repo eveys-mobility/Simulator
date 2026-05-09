@@ -8,6 +8,7 @@ import {
     Play,
     Search,
     Terminal,
+    Waves,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -27,13 +28,32 @@ interface Props {
  * → store appends, capped at 500). Supports text filter, follow/pause,
  * clear, and per-row JSON expand.
  */
+/** Window during which a `frames-coalesced` event still counts as
+ *  "currently throttling". Tied to the server's 100ms flush cadence:
+ *  if no drops in this many ms, the indicator goes away. */
+const COALESCE_INDICATOR_MS = 3000;
+
 export function TraceViewer({ deviceId }: Props) {
     const traces = useLiveStore((s) => s.traces.get(deviceId)) ?? EMPTY;
     const clear = useLiveStore((s) => s.clearTraces);
+    const coalesce = useLiveStore((s) => s.coalesce);
 
     const [filter, setFilter] = useState('');
     const [follow, setFollow] = useState(true);
     const [openIds, setOpenIds] = useState<Set<number>>(() => new Set());
+    // Re-render every ~500ms only while a recent coalesce sample is
+    // still inside the indicator window. This is what lets the badge
+    // disappear after the load drops; without it we'd be stuck on
+    // the last value forever.
+    const [, setTick] = useState(0);
+    useEffect(() => {
+        if (coalesce.lastSampleAt === 0) return;
+        const id = setInterval(() => setTick((n) => n + 1), 500);
+        return () => clearInterval(id);
+    }, [coalesce.lastSampleAt]);
+
+    const isThrottling =
+        coalesce.lastSampleAt > 0 && Date.now() - coalesce.lastSampleAt < COALESCE_INDICATOR_MS;
 
     const filtered = useMemo(() => {
         if (!filter.trim()) return traces;
@@ -70,6 +90,16 @@ export function TraceViewer({ deviceId }: Props) {
                         {filter && filtered.length !== traces.length && ` of ${traces.length}`}
                         {traces.length === 500 && ' (last 500)'}
                     </span>
+                    {isThrottling && (
+                        <Badge
+                            variant="outline"
+                            className="gap-1 bg-amber-500/15 text-amber-600 border-amber-500/30"
+                            title={`Server coalesced ${coalesce.totalDropped} repetitive frames since this tab opened`}
+                        >
+                            <Waves className="h-3 w-3" />
+                            throttled +{coalesce.lastWindowDropped}
+                        </Badge>
+                    )}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                     <div className="relative">
