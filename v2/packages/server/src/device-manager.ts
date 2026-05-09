@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Device } from '@ocpp-sim/core';
 import { Simulator } from './simulator.js';
+import type { Store } from './store.js';
 
 /**
  * Owns the live `Simulator` for every device in the database.
@@ -13,6 +14,10 @@ import { Simulator } from './simulator.js';
 export class DeviceManager extends EventEmitter {
     private sims = new Map<string, Simulator>();
 
+    constructor(private readonly store: Store) {
+        super();
+    }
+
     list(): Simulator[] {
         return [...this.sims.values()];
     }
@@ -23,7 +28,7 @@ export class DeviceManager extends EventEmitter {
 
     async spawn(device: Device): Promise<void> {
         if (this.sims.has(device.id)) return;
-        const sim = new Simulator(device);
+        const sim = new Simulator(device, this.store);
         sim.on('state', (s) => this.emit('state', { deviceId: device.id, ...s }));
         sim.on('tick', (t) => this.emit('tick', t));
         sim.on('session', (s) => this.emit('session', { deviceId: device.id, ...s }));

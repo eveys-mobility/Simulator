@@ -6,7 +6,9 @@ import {
     type MeterTick,
     sim,
 } from '@ocpp-sim/core';
-import { OcppClient } from './ocpp-client.js';
+import { type IncomingCallResult, OcppClient } from './ocpp-client.js';
+import { OcppConfig } from './ocpp-config.js';
+import type { Store } from './store.js';
 
 interface ConnectorState {
     status: ConnectorStatus;
@@ -17,6 +19,11 @@ interface ConnectorState {
     peakPowerW: number;
     startedAtMs: number;
     tickTimer: NodeJS.Timeout | null;
+    /** Operational state, decoupled from OCPP status. ChangeAvailability
+     *  Inoperative blocks new sessions but the connector still reports
+     *  status. Modeled as a flag, not a status — so a faulted connector
+     *  is also unavailable. */
+    operative: boolean;
 }
 
 /**
@@ -34,9 +41,16 @@ interface ConnectorState {
 export class Simulator extends EventEmitter {
     private client: OcppClient;
     private connectors: Map<number, ConnectorState> = new Map();
+    private config: OcppConfig;
+    /** SessionRowId allocator — the API layer hands us the persisted row
+     *  id when it starts a session it initiated. For sessions we open
+     *  ourselves (RemoteStartTransaction), we need someone to persist
+     *  the row first. The store is injected so we can do that inline. */
+    private store: Store;
 
-    constructor(public readonly device: Device) {
+    constructor(public readonly device: Device, store: Store) {
         super();
+        this.store = store;
         const numConnectors = device.type === 'DC' ? 2 : 1;
         for (let id = 1; id <= numConnectors; id++) {
             this.connectors.set(id, {
@@ -48,12 +62,31 @@ export class Simulator extends EventEmitter {
                 peakPowerW: 0,
                 startedAtMs: 0,
                 tickTimer: null,
+                operative: true,
             });
         }
+        this.config = new OcppConfig(store, device.id, numConnectors);
+        // Effects: keep the OcppClient's heartbeat in sync with the
+        // CSMS-writable HeartbeatInterval. Other effects (meter cadence,
+        // etc.) read the value lazily from `this.config` on each tick.
+        this.config.onChange((key, value) => {
+            if (key === 'HeartbeatInterval') {
+                const seconds = Number(value);
+                if (Number.isFinite(seconds) && seconds > 0) {
+                    this.client.setHeartbeatIntervalSec(seconds);
+                }
+            }
+        });
         this.client = new OcppClient(device);
+        this.client.setIncomingHandler((action, payload) => this.handleCsmsCall(action, payload));
         this.client.on('online', () => this.handleOnline());
         this.client.on('offline', () => this.emit('state', { online: false }));
-        this.client.on('booted', () => this.emit('state', { online: true }));
+        this.client.on('booted', () => {
+            // Apply any persisted heartbeat-interval override now that we're connected.
+            const hb = this.config.getNumber('HeartbeatInterval');
+            if (hb && hb > 0) this.client.setHeartbeatIntervalSec(hb);
+            this.emit('state', { online: true });
+        });
         this.client.on('frame', (f) => this.emit('frame', f));
         this.client.on('error', (e) => this.emit('error', e));
     }
@@ -86,6 +119,7 @@ export class Simulator extends EventEmitter {
     async startSession(connectorId: number, idTag: string, sessionRowId: number): Promise<number> {
         const c = this.requireConnector(connectorId);
         if (c.transactionId) throw new Error(`connector ${connectorId} already has an active transaction`);
+        if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
         if (!this.client.isOnline()) throw new Error('device offline; cannot start session');
         await this.setStatus(connectorId, 'Preparing');
         const res = await this.client.startTransaction({ connectorId, idTag, meterStart: 0 });
@@ -160,6 +194,247 @@ export class Simulator extends EventEmitter {
         const c = this.connectors.get(id);
         if (!c) throw new Error(`device ${this.device.id} has no connector ${id}`);
         return c;
+    }
+
+    // ---- CSMS-initiated CALL handling ----
+
+    /**
+     * Decide how to respond to a CSMS CALL. The OcppClient turns our
+     * `IncomingCallResult` into a wire frame; we own the semantics.
+     * Public for testing — production traffic flows through the
+     * `setIncomingHandler` registration in the constructor.
+     */
+    async handleCsmsCall(action: string, payload: unknown): Promise<IncomingCallResult> {
+        const p = (payload ?? {}) as Record<string, unknown>;
+        switch (action) {
+            case 'GetConfiguration':
+                return { ok: true, result: this.config.getMany(p.key as string[] | undefined) };
+
+            case 'ChangeConfiguration': {
+                const key = String(p.key ?? '');
+                const value = String(p.value ?? '');
+                if (!key) return { ok: true, result: { status: 'Rejected' } };
+                const status = this.config.set(key, value);
+                return { ok: true, result: { status } };
+            }
+
+            case 'RemoteStartTransaction':
+                return { ok: true, result: { status: await this.handleRemoteStart(p) } };
+
+            case 'RemoteStopTransaction':
+                return { ok: true, result: { status: await this.handleRemoteStop(p) } };
+
+            case 'Reset':
+                return { ok: true, result: { status: this.handleReset(String(p.type ?? 'Soft')) } };
+
+            case 'ChangeAvailability':
+                return { ok: true, result: { status: await this.handleChangeAvailability(p) } };
+
+            case 'UnlockConnector':
+                return { ok: true, result: { status: this.handleUnlock(Number(p.connectorId)) } };
+
+            case 'TriggerMessage':
+                return { ok: true, result: { status: await this.handleTrigger(p) } };
+
+            case 'DataTransfer': {
+                const vendorId = String(p.vendorId ?? '');
+                if (vendorId === this.device.vendor) {
+                    return { ok: true, result: { status: 'Accepted' } };
+                }
+                return { ok: true, result: { status: 'UnknownVendorId' } };
+            }
+
+            case 'ClearCache':
+                // No local-auth cache yet; reply Accepted so the CSMS can
+                // tick the box. The real cache lands with the LocalAuthList
+                // feature later in the roadmap.
+                return { ok: true, result: { status: 'Accepted' } };
+
+            default:
+                return { ok: false, code: 'NotImplemented', description: `${action} is not implemented` };
+        }
+    }
+
+    private async handleRemoteStart(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected'> {
+        const idTag = typeof p.idTag === 'string' ? p.idTag : '';
+        const requestedConnectorId = typeof p.connectorId === 'number' ? p.connectorId : null;
+        if (!idTag) return 'Rejected';
+
+        // Pick a connector: caller's choice if eligible, else the first
+        // Available + Operative one. Reject if none qualify.
+        const candidates = requestedConnectorId !== null ? [requestedConnectorId] : [...this.connectors.keys()];
+        const target = candidates.find((id) => {
+            const c = this.connectors.get(id);
+            return !!c && c.operative && c.status === 'Available' && c.transactionId === null;
+        });
+        if (target === undefined) return 'Rejected';
+
+        // Per OCPP §6.18, if AuthorizeRemoteTxRequests is true the device
+        // must Authorize first. We don't ship a real Authorize handler yet
+        // (LocalAuthList phase) — just honor the bit by skipping the call
+        // when false (the gateway already authorized) and warning when true.
+        const requiresAuthorize = this.config.getBool('AuthorizeRemoteTxRequests') ?? false;
+        if (requiresAuthorize) {
+            // Best-effort Authorize; treat any error as Rejected.
+            try {
+                await this.client.call('Authorize', { idTag });
+            } catch {
+                return 'Rejected';
+            }
+        }
+
+        // Persist the session row and start asynchronously — the CALLRESULT
+        // must come back promptly, but starting the transaction itself is
+        // an outgoing CALL chain that can take seconds.
+        const sessionRowId = this.store.insertSession({
+            deviceId: this.device.id,
+            connectorId: target,
+            transactionId: 0,
+            idTag,
+            status: 'active',
+            startedAt: new Date().toISOString(),
+            endedAt: null,
+            endReason: null,
+            energyWh: 0,
+            peakPowerKw: 0,
+        });
+        void this.startSession(target, idTag, sessionRowId)
+            .then((txId) => {
+                this.store.db
+                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                    .run(txId, sessionRowId);
+            })
+            .catch((err) => {
+                this.store.endSession({
+                    id: sessionRowId,
+                    endedAt: new Date().toISOString(),
+                    endReason: 'aborted',
+                    energyWh: 0,
+                    peakPowerKw: 0,
+                });
+                this.emit('error', err);
+            });
+
+        return 'Accepted';
+    }
+
+    private async handleRemoteStop(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected'> {
+        const tx = typeof p.transactionId === 'number' ? p.transactionId : null;
+        if (tx === null) return 'Rejected';
+        for (const [id, c] of this.connectors.entries()) {
+            if (c.transactionId === tx) {
+                void this.stopSession(id, 'Remote').catch((err) => this.emit('error', err));
+                return 'Accepted';
+            }
+        }
+        return 'Rejected';
+    }
+
+    private handleReset(type: string): 'Accepted' | 'Rejected' {
+        // Soft = clean-disconnect-and-reconnect.
+        // Hard = also abort any active transactions with reason=HardReset.
+        const isHard = type === 'Hard';
+        // Defer the actual work so the CALLRESULT goes out first.
+        setTimeout(() => {
+            void this.performReset(isHard);
+        }, 100);
+        return 'Accepted';
+    }
+
+    private async performReset(isHard: boolean): Promise<void> {
+        if (isHard) {
+            for (const [id, c] of this.connectors.entries()) {
+                if (c.transactionId !== null) {
+                    await this.stopSession(id, 'HardReset').catch(() => undefined);
+                }
+            }
+        }
+        // Disconnect + let the auto-reconnect bring it back. The OcppClient
+        // already handles this without our help — close the socket directly.
+        this.client.disconnect();
+    }
+
+    private async handleChangeAvailability(
+        p: Record<string, unknown>,
+    ): Promise<'Accepted' | 'Rejected' | 'Scheduled'> {
+        const id = typeof p.connectorId === 'number' ? p.connectorId : null;
+        const type = String(p.type ?? '');
+        if (id === null || (type !== 'Operative' && type !== 'Inoperative')) return 'Rejected';
+
+        // connectorId=0 means "all connectors" per OCPP.
+        const targets = id === 0 ? [...this.connectors.keys()] : [id];
+        const operative = type === 'Operative';
+
+        // If any target has an active transaction, schedule the change
+        // for after the session ends (we just defer setting the flag).
+        const anyActive = targets.some((t) => this.connectors.get(t)?.transactionId !== null);
+        for (const t of targets) {
+            const c = this.connectors.get(t);
+            if (!c) return 'Rejected';
+            if (c.transactionId !== null) continue; // skip — Scheduled
+            c.operative = operative;
+            await this.setStatus(t, operative ? 'Available' : 'Unavailable');
+        }
+        return anyActive ? 'Scheduled' : 'Accepted';
+    }
+
+    private handleUnlock(connectorId: number): 'Unlocked' | 'UnlockFailed' | 'NotSupported' {
+        if (connectorId <= 0) return 'NotSupported';
+        const c = this.connectors.get(connectorId);
+        if (!c) return 'NotSupported';
+        // No physical lock to model — just report success. If a session
+        // is active, OCPP suggests stopping it; we leave that to the
+        // CSMS to orchestrate via RemoteStop, since UnlockConnector is
+        // the rare-recovery path.
+        return 'Unlocked';
+    }
+
+    private async handleTrigger(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected' | 'NotImplemented'> {
+        const requested = String(p.requestedMessage ?? '');
+        const connectorId = typeof p.connectorId === 'number' ? p.connectorId : null;
+        switch (requested) {
+            case 'BootNotification':
+                // OCPP §6.34 — re-emit a BootNotification.
+                this.client
+                    .call('BootNotification', {
+                        chargePointVendor: this.device.vendor,
+                        chargePointModel: this.device.model,
+                        chargePointSerialNumber: this.device.id,
+                        firmwareVersion: this.device.firmwareVersion,
+                    })
+                    .catch(() => undefined);
+                return 'Accepted';
+            case 'Heartbeat':
+                this.client.call('Heartbeat', {}).catch(() => undefined);
+                return 'Accepted';
+            case 'StatusNotification': {
+                const targets = connectorId !== null ? [connectorId] : [...this.connectors.keys()];
+                for (const t of targets) {
+                    const c = this.connectors.get(t);
+                    if (!c) continue;
+                    this.client.sendStatusNotification(t, c.status).catch(() => undefined);
+                }
+                return 'Accepted';
+            }
+            case 'MeterValues': {
+                const targets = connectorId !== null ? [connectorId] : [...this.connectors.keys()];
+                for (const t of targets) {
+                    const c = this.connectors.get(t);
+                    if (!c?.transactionId) continue;
+                    this.client
+                        .sendMeterValue(t, c.transactionId, c.energyWh, 0)
+                        .catch(() => undefined);
+                }
+                return 'Accepted';
+            }
+            case 'DiagnosticsStatusNotification':
+            case 'FirmwareStatusNotification':
+                // We don't model firmware/diagnostics yet — politely
+                // decline rather than lie with Accepted.
+                return 'NotImplemented';
+            default:
+                return 'NotImplemented';
+        }
     }
 
     private tick(connectorId: number): void {

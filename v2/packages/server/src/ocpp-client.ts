@@ -24,6 +24,16 @@ interface PendingCall {
 const CALL_TIMEOUT_MS = 30_000;
 
 /**
+ * Result of handling a CSMS-initiated CALL. The Simulator owns
+ * the actual semantics; OcppClient just turns this into a frame.
+ */
+export type IncomingCallResult =
+    | { ok: true; result: unknown }
+    | { ok: false; code: string; description: string };
+
+export type IncomingCallHandler = (action: string, payload: unknown) => Promise<IncomingCallResult>;
+
+/**
  * One OCPP 1.6J client per device. Owns the WebSocket to the gateway,
  * tracks in-flight CALLs by id, surfaces high-level events. Reconnects
  * with exponential backoff on close.
@@ -37,9 +47,38 @@ export class OcppClient extends EventEmitter {
     private heartbeatIntervalSec = 300;
     private reconnectAttempt = 0;
     private stopped = false;
+    private incomingHandler: IncomingCallHandler | null = null;
 
     constructor(private readonly device: Device) {
         super();
+    }
+
+    /** Register the function that decides how to respond to CSMS CALLs.
+     *  Must be set before the WebSocket opens; without it, every incoming
+     *  CALL gets a NotImplemented CALLERROR. */
+    setIncomingHandler(h: IncomingCallHandler): void {
+        this.incomingHandler = h;
+    }
+
+    /** Close the socket without stopping. The `close` handler schedules
+     *  a reconnect, so this models a Reset-style soft restart of the
+     *  WebSocket without tearing down the device. */
+    disconnect(): void {
+        if (this.ws) {
+            this.ws.close();
+        }
+    }
+
+    /** Update the heartbeat cadence. Used when the CSMS issues a
+     *  ChangeConfiguration for HeartbeatInterval. Idempotent — restarts
+     *  the interval timer at the new cadence. */
+    setHeartbeatIntervalSec(seconds: number): void {
+        if (!Number.isFinite(seconds) || seconds <= 0) return;
+        this.heartbeatIntervalSec = seconds;
+        if (this.heartbeat) {
+            clearInterval(this.heartbeat);
+            this.startHeartbeat();
+        }
     }
 
     isOnline(): boolean {
@@ -148,7 +187,7 @@ export class OcppClient extends EventEmitter {
         if (frame[0] === MessageType.CALL) {
             const [, id, action, payload] = frame;
             this.emit('frame', { direction: 'in', id, action, payload });
-            this.handleIncomingCall(id, action, payload);
+            void this.handleIncomingCall(id, action, payload);
             return;
         }
         if (frame[0] === MessageType.CALLRESULT) {
@@ -175,31 +214,22 @@ export class OcppClient extends EventEmitter {
         }
     }
 
-    private handleIncomingCall(id: string, action: string, _payload: unknown): void {
-        // CSMS-initiated actions (RemoteStartTransaction, GetConfiguration,
-        // ChangeConfiguration, Reset, etc.) — for now we accept everything
-        // with a stub response so the gateway treats the device as
-        // compliant. Full handling is a follow-up.
-        switch (action) {
-            case 'RemoteStartTransaction':
-            case 'RemoteStopTransaction':
-                this.ws?.send(encodeResult(id, { status: 'Accepted' }));
-                this.emit('remote', { action });
-                break;
-            case 'Reset':
-                this.ws?.send(encodeResult(id, { status: 'Accepted' }));
-                break;
-            case 'ChangeConfiguration':
-                this.ws?.send(encodeResult(id, { status: 'Accepted' }));
-                break;
-            case 'GetConfiguration':
-                this.ws?.send(encodeResult(id, { configurationKey: [] }));
-                break;
-            case 'TriggerMessage':
-                this.ws?.send(encodeResult(id, { status: 'Accepted' }));
-                break;
-            default:
-                this.ws?.send(encodeError(id, 'NotImplemented', `${action} not implemented in v2 yet`));
+    private async handleIncomingCall(id: string, action: string, payload: unknown): Promise<void> {
+        if (!this.incomingHandler) {
+            this.ws?.send(encodeError(id, 'NotImplemented', `no handler registered for ${action}`));
+            return;
+        }
+        let outcome: IncomingCallResult;
+        try {
+            outcome = await this.incomingHandler(action, payload);
+        } catch (err) {
+            outcome = { ok: false, code: 'InternalError', description: (err as Error).message };
+        }
+        if (!this.ws) return;
+        if (outcome.ok) {
+            this.ws.send(encodeResult(id, outcome.result));
+        } else {
+            this.ws.send(encodeError(id, outcome.code, outcome.description));
         }
     }
 
