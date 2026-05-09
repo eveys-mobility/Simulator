@@ -6,6 +6,12 @@ import {
     type MeterTick,
     sim,
 } from '@ocpp-sim/core';
+import {
+    ocppActiveSessions,
+    ocppSessionDurationSeconds,
+    ocppSessionEnergyWh,
+    simTickLagSeconds,
+} from './metrics.js';
 import { type IncomingCallResult, OcppClient } from './ocpp-client.js';
 import { OcppConfig } from './ocpp-config.js';
 import type { Store } from './store.js';
@@ -141,6 +147,7 @@ export class Simulator extends EventEmitter {
         c.startedAtMs = Date.now();
         await this.setStatus(connectorId, 'Charging');
         c.tickTimer = setInterval(() => this.tick(connectorId), 1000);
+        ocppActiveSessions.inc({ device_type: this.device.type });
         this.emit('session', { type: 'started', connectorId, transactionId: res.transactionId, idTag, sessionRowId });
         return res.transactionId;
     }
@@ -160,6 +167,10 @@ export class Simulator extends EventEmitter {
         const sessionRowId = c.sessionRowId;
         const energyWh = Math.round(c.energyWh);
         const peakPowerKw = c.peakPowerW / 1000;
+        const durationSec = (Date.now() - c.startedAtMs) / 1000;
+        ocppActiveSessions.dec({ device_type: this.device.type });
+        ocppSessionDurationSeconds.observe({ device_type: this.device.type, end_reason: reason }, durationSec);
+        ocppSessionEnergyWh.observe({ device_type: this.device.type }, energyWh);
         await this.setStatus(connectorId, 'Finishing');
         try {
             await this.client.stopTransaction({ transactionId: tx, meterStop: energyWh, reason, idTag: c.idTag ?? undefined });
@@ -623,7 +634,13 @@ export class Simulator extends EventEmitter {
         const c = this.requireConnector(connectorId);
         if (!c.transactionId) return;
 
-        const t = (Date.now() - c.startedAtMs) / 1000;
+        const nowMs = Date.now();
+        const t = (nowMs - c.startedAtMs) / 1000;
+        // Drift is fractional seconds between integer-second ticks. The
+        // gauge holds the latest sample (good enough for "is the tick
+        // loop falling behind?" — a histogram would be overkill).
+        const lagSec = (t - Math.round(t)) > 0 ? (t - Math.floor(t)) : 0;
+        if (Number.isFinite(lagSec)) simTickLagSeconds.set(lagSec);
         let powerW = 0;
         let socPct: number | undefined;
         if (this.device.type === 'DC') {

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { Device } from '@ocpp-sim/core';
+import { ocppActiveDevices } from './metrics.js';
 import { Simulator } from './simulator.js';
 import type { Store } from './store.js';
 
@@ -13,9 +14,17 @@ import type { Store } from './store.js';
  */
 export class DeviceManager extends EventEmitter {
     private sims = new Map<string, Simulator>();
+    private online = new Set<string>();
 
     constructor(private readonly store: Store) {
         super();
+    }
+
+    private syncDeviceGauge(): void {
+        const total = this.sims.size;
+        const onlineCount = this.online.size;
+        ocppActiveDevices.set({ state: 'online' }, onlineCount);
+        ocppActiveDevices.set({ state: 'offline' }, total - onlineCount);
     }
 
     list(): Simulator[] {
@@ -29,12 +38,20 @@ export class DeviceManager extends EventEmitter {
     async spawn(device: Device): Promise<void> {
         if (this.sims.has(device.id)) return;
         const sim = new Simulator(device, this.store);
-        sim.on('state', (s) => this.emit('state', { deviceId: device.id, ...s }));
+        sim.on('state', (s: { online?: boolean; connectorId?: number; status?: string }) => {
+            if (typeof s.online === 'boolean') {
+                if (s.online) this.online.add(device.id);
+                else this.online.delete(device.id);
+                this.syncDeviceGauge();
+            }
+            this.emit('state', { deviceId: device.id, ...s });
+        });
         sim.on('tick', (t) => this.emit('tick', t));
         sim.on('session', (s) => this.emit('session', { deviceId: device.id, ...s }));
         sim.on('frame', (f) => this.emit('frame', { deviceId: device.id, ...f }));
         sim.on('error', (e) => this.emit('errored', { deviceId: device.id, error: e }));
         this.sims.set(device.id, sim);
+        this.syncDeviceGauge();
         try {
             await sim.start();
         } catch (err) {
@@ -58,6 +75,8 @@ export class DeviceManager extends EventEmitter {
         } finally {
             sim.stop();
             this.sims.delete(id);
+            this.online.delete(id);
+            this.syncDeviceGauge();
         }
     }
 

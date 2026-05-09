@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
 import type { DeviceManager } from './device-manager.js';
+import { registry as metricsRegistry } from './metrics.js';
 import type { Store } from './store.js';
 
 interface BuildArgs {
@@ -384,6 +385,13 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
     });
 
     app.get('/api/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+    // Prometheus scrape endpoint. Internal-only, no auth — bind the
+    // server to localhost or behind your network policy in production.
+    app.get('/metrics', async (_req, reply) => {
+        const body = await metricsRegistry.metrics();
+        reply.header('Content-Type', metricsRegistry.contentType).send(body);
+    });
 
     // ---- APP SETTINGS ----
     //

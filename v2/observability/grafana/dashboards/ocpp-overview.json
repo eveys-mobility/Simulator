@@ -1,0 +1,133 @@
+{
+    "annotations": { "list": [] },
+    "editable": true,
+    "panels": [
+        {
+            "type": "stat",
+            "title": "Active devices",
+            "id": 1,
+            "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+            "targets": [
+                {
+                    "expr": "sum(ocpp_active_devices)",
+                    "legendFormat": "total",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] },
+            "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+            "type": "stat",
+            "title": "Online devices",
+            "id": 2,
+            "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+            "targets": [
+                {
+                    "expr": "ocpp_active_devices{state=\"online\"}",
+                    "legendFormat": "online",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] },
+            "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+            "type": "stat",
+            "title": "Active sessions",
+            "id": 3,
+            "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+            "targets": [
+                {
+                    "expr": "sum(ocpp_active_sessions)",
+                    "legendFormat": "total",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] },
+            "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+            "type": "stat",
+            "title": "WS reconnects (5m)",
+            "id": 4,
+            "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+            "targets": [
+                {
+                    "expr": "increase(ocpp_ws_reconnects_total[5m])",
+                    "legendFormat": "reconnects",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] },
+            "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+            "type": "timeseries",
+            "title": "OCPP CALL rate (per second)",
+            "id": 5,
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+            "targets": [
+                {
+                    "expr": "sum by (action) (rate(ocpp_call_total[1m]))",
+                    "legendFormat": "{{action}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+            "options": { "legend": { "displayMode": "table", "placement": "right" } }
+        },
+        {
+            "type": "timeseries",
+            "title": "OCPP CALL latency p99 (s)",
+            "id": 6,
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le, action) (rate(ocpp_call_latency_seconds_bucket[5m])))",
+                    "legendFormat": "p99 {{action}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+            "options": { "legend": { "displayMode": "table", "placement": "right" } }
+        },
+        {
+            "type": "timeseries",
+            "title": "Errors per second by action",
+            "id": 7,
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+            "targets": [
+                {
+                    "expr": "sum by (action, error_code) (rate(ocpp_call_errors_total[1m]))",
+                    "legendFormat": "{{action}} {{error_code}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+            "options": { "legend": { "displayMode": "table", "placement": "right" } }
+        },
+        {
+            "type": "timeseries",
+            "title": "Frame throughput (in/out)",
+            "id": 8,
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+            "targets": [
+                {
+                    "expr": "sum by (direction) (rate(ocpp_frames_total[1m]))",
+                    "legendFormat": "{{direction}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+        }
+    ],
+    "schemaVersion": 39,
+    "tags": ["ocpp", "simulator"],
+    "templating": { "list": [] },
+    "time": { "from": "now-15m", "to": "now" },
+    "timezone": "browser",
+    "title": "OCPP Simulator — Overview",
+    "uid": "ocpp-overview",
+    "version": 1
+}
