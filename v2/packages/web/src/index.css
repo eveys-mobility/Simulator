@@ -83,9 +83,19 @@
         --accent-foreground: 204 30% 9%;
         --destructive: 348 88% 58%;
         --destructive-foreground: 0 0% 100%;
-        --border: 204 22% 16%;               /* darker so it's a hairline, not a stripe */
-        --input: 204 22% 18%;
+        --border: 204 22% 14%;               /* hairline against the slate card */
+        --input: 204 22% 16%;
         --ring: 13 88% 58%;
+    }
+
+    /*
+     * Default the `border` utility to the theme border, not currentColor.
+     * Without this, a `<div className="border">` picks up the foreground
+     * (near-white in dark mode), producing the "white borders everywhere"
+     * problem. shadcn ships this rule as part of its base reset.
+     */
+    * {
+        border-color: hsl(var(--border));
     }
 
     body {

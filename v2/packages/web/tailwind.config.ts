@@ -4,6 +4,17 @@ import animate from 'tailwindcss-animate';
 const config: Config = {
     darkMode: ['class'],
     content: ['./index.html', './src/**/*.{ts,tsx}'],
+    // Belt-and-suspenders for utilities Tailwind's content scanner has
+    // missed in the past (popover, accent variants used inside Radix
+    // Portal-rendered subtrees). Cheap to keep.
+    safelist: [
+        'bg-popover',
+        'text-popover-foreground',
+        'bg-accent',
+        'text-accent-foreground',
+        'bg-destructive',
+        'text-destructive-foreground',
+    ],
     theme: {
         extend: {
             colors: {
@@ -35,6 +46,10 @@ const config: Config = {
                 card: {
                     DEFAULT: 'hsl(var(--card))',
                     foreground: 'hsl(var(--card-foreground))',
+                },
+                popover: {
+                    DEFAULT: 'hsl(var(--popover))',
+                    foreground: 'hsl(var(--popover-foreground))',
                 },
                 brand: {
                     orange: 'hsl(var(--brand-orange))',
