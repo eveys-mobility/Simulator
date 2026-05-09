@@ -24,7 +24,8 @@ export interface GroupRow {
     name: string;
     type: CPType;
     lb_strategy: LbStrategy;
-    lb_enabled: number; // SQLite stores BOOLEAN as INTEGER 0/1
+    lb_enabled: number;          // SQLite stores BOOLEAN as INTEGER 0/1
+    lb_round_robin_cursor: number; // monotonic count of round_robin picks
     created_at: string;
 }
 
@@ -56,12 +57,13 @@ export interface SessionRow {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS groups (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,
-    type        TEXT NOT NULL CHECK (type IN ('AC', 'DC')),
-    lb_strategy TEXT NOT NULL DEFAULT 'round_robin' CHECK (lb_strategy IN ('round_robin', 'least_active')),
-    lb_enabled  INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT NOT NULL UNIQUE,
+    type                  TEXT NOT NULL CHECK (type IN ('AC', 'DC')),
+    lb_strategy           TEXT NOT NULL DEFAULT 'round_robin' CHECK (lb_strategy IN ('round_robin', 'least_active')),
+    lb_enabled            INTEGER NOT NULL DEFAULT 1,
+    lb_round_robin_cursor INTEGER NOT NULL DEFAULT 0,
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS charge_points (
@@ -128,6 +130,7 @@ export class FleetStore {
         // ON DELETE SET NULL on cp.group_id to actually fire.
         this.db.pragma('foreign_keys = ON');
         this.db.exec(SCHEMA);
+        this.migrate();
 
         this.groupInsert = this.db.prepare(`
             INSERT INTO groups (name, type, lb_strategy, lb_enabled)
@@ -190,6 +193,33 @@ export class FleetStore {
 
     close(): void {
         this.db.close();
+    }
+
+    /**
+     * Backwards-compatible column adds. SQLite's ALTER TABLE only
+     * supports `ADD COLUMN`, never DROP / MODIFY, so each migration
+     * step is a no-op once applied. We use `pragma table_info` to
+     * detect what's present rather than tracking a schema_version
+     * counter — at v1 scale, this is plenty.
+     */
+    private migrate(): void {
+        const groupCols = (this.db.pragma('table_info(groups)') as Array<{ name: string }>)
+            .map((c) => c.name);
+        if (!groupCols.includes('lb_round_robin_cursor')) {
+            this.db.exec('ALTER TABLE groups ADD COLUMN lb_round_robin_cursor INTEGER NOT NULL DEFAULT 0');
+        }
+    }
+
+    /**
+     * Atomically increment a group's round-robin cursor and return
+     * the new value. Used by the load balancer to pick the next CP
+     * in a stable, restart-survivable rotation.
+     */
+    advanceRoundRobinCursor(groupId: number): number {
+        const row = this.db
+            .prepare('UPDATE groups SET lb_round_robin_cursor = lb_round_robin_cursor + 1 WHERE id = ? RETURNING lb_round_robin_cursor')
+            .get(groupId) as { lb_round_robin_cursor: number } | undefined;
+        return row?.lb_round_robin_cursor ?? 0;
     }
 
     /**

@@ -15,6 +15,7 @@ import { Registry } from './registry';
 import { WorkerSupervisor } from './supervisor';
 import { createFleetRouter, bootstrapFromStore } from './api';
 import { FleetStore } from './sqlite';
+import { FleetPubSub } from './pubsub';
 
 const PORT = Number(process.env.FLEET_PORT ?? 3100);
 const DEFAULT_OCPP_URL = process.env.FLEET_OCPP_URL ?? 'ws://localhost:19000';
@@ -53,8 +54,16 @@ const server = app.listen(PORT, () => {
     }
 });
 
+// WS pubsub on /fleet/ws — one channel for all fleet UI clients.
+// Subscribed AFTER the HTTP server is listening so .upgrade
+// handshakes succeed; before the supervisor relays anything so the
+// first cp_state events aren't dropped.
+const pubsub = new FleetPubSub({ server, registry, store });
+supervisor.onUp((cp_id, msg) => pubsub.relayUp(cp_id, msg));
+
 const shutdown = async (signal: string): Promise<void> => {
     console.log(`[fleet] ${signal} received, shutting down`);
+    pubsub.close();
     await supervisor.shutdown();
     store.close();
     server.close(() => {
