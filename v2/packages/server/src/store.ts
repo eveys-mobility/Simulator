@@ -174,6 +174,30 @@ export class Store {
             .run({ now });
         return r.changes;
     }
+
+    // ---- per-device OCPP configuration ----
+
+    listConfig(deviceId: string): { key: string; value: string }[] {
+        return this.db
+            .prepare(`SELECT key, value FROM device_config WHERE device_id = ? ORDER BY key`)
+            .all(deviceId) as { key: string; value: string }[];
+    }
+
+    getConfig(deviceId: string, key: string): string | null {
+        const row = this.db
+            .prepare(`SELECT value FROM device_config WHERE device_id = ? AND key = ?`)
+            .get(deviceId, key) as { value: string } | undefined;
+        return row?.value ?? null;
+    }
+
+    setConfig(deviceId: string, key: string, value: string): void {
+        this.db
+            .prepare(
+                `INSERT INTO device_config (device_id, key, value) VALUES (?, ?, ?)
+                 ON CONFLICT(device_id, key) DO UPDATE SET value = excluded.value`,
+            )
+            .run(deviceId, key, value);
+    }
 }
 
 interface DeviceRow {
@@ -268,6 +292,17 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
             );
             CREATE INDEX sessions_device ON sessions(device_id);
             CREATE INDEX sessions_status ON sessions(status);
+        `);
+    },
+    // v2 — per-device OCPP configuration store
+    (db) => {
+        db.exec(`
+            CREATE TABLE device_config (
+                device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                key        TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                PRIMARY KEY (device_id, key)
+            );
         `);
     },
 ];

@@ -14,7 +14,7 @@ const store = new Store(DB_PATH);
 const aborted = store.abortOrphanedSessions();
 if (aborted) console.log(`[server] aborted ${aborted} orphaned active session(s) from prior run`);
 
-const manager = new DeviceManager();
+const manager = new DeviceManager(store);
 
 // Re-spawn every device persisted in the DB at boot.
 for (const d of store.listDevices()) {
