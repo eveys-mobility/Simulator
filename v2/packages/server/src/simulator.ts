@@ -644,9 +644,14 @@ export class Simulator extends EventEmitter {
         // when false (the gateway already authorized) and warning when true.
         const requiresAuthorize = this.config.getBool('AuthorizeRemoteTxRequests') ?? false;
         if (requiresAuthorize) {
-            // Best-effort Authorize; treat any error as Rejected.
             try {
-                await this.client.call('Authorize', { idTag });
+                const auth = (await this.client.call('Authorize', { idTag })) as {
+                    idTagInfo?: { status?: string };
+                };
+                // OCPP §6.18: only `Accepted` permits the start. Other
+                // statuses (Blocked / Expired / Invalid / ConcurrentTx)
+                // mean the gateway refused the tag.
+                if (auth.idTagInfo?.status !== 'Accepted') return 'Rejected';
             } catch {
                 return 'Rejected';
             }
