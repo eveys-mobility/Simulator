@@ -219,6 +219,133 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         }
     });
 
+    // ---- MANUAL / PHYSICAL ACTIONS ----
+    //
+    // Each endpoint maps to a Simulator method that drives the real
+    // OCPP semantics — these are the moral equivalents of "user walks
+    // up to the charger and …" actions surfaced from the UI for testing.
+
+    const ConnectorIdBody = z.object({ connectorId: z.number().int().positive() });
+
+    const SwipeBody = z.object({
+        connectorId: z.number().int().positive(),
+        idTag: z.string().min(1).max(20),
+    });
+
+    const FaultBody = z.object({
+        connectorId: z.number().int().positive(),
+        errorCode: z
+            .enum([
+                'ConnectorLockFailure',
+                'EVCommunicationError',
+                'GroundFailure',
+                'HighTemperature',
+                'InternalError',
+                'OtherError',
+                'OverCurrentFailure',
+                'OverVoltage',
+                'PowerMeterFailure',
+                'PowerSwitchFailure',
+                'ReaderFailure',
+                'ResetFailure',
+                'UnderVoltage',
+                'WeakSignal',
+            ])
+            .default('OtherError'),
+        clearAfterSeconds: z.number().int().nonnegative().optional(),
+    });
+
+    const RebootBody = z.object({ type: z.enum(['Soft', 'Hard']) });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/plug-in', async (req, reply) => {
+        const body = ConnectorIdBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.plugIn(body.data.connectorId);
+            return { ok: true };
+        } catch (err) {
+            return reply.code(409).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/plug-out', async (req, reply) => {
+        const body = ConnectorIdBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.plugOut(body.data.connectorId);
+            return { ok: true };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/swipe', async (req, reply) => {
+        const body = SwipeBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            const outcome = await sim.swipeCard(body.data.connectorId, body.data.idTag);
+            return { ok: true, outcome };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/fault', async (req, reply) => {
+        const body = FaultBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.injectFault(body.data);
+            return { ok: true };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/clear-fault', async (req, reply) => {
+        const body = ConnectorIdBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.clearFault(body.data.connectorId);
+            return { ok: true };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/emergency-stop', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.emergencyStop();
+            return { ok: true };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reboot', async (req, reply) => {
+        const body = RebootBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        try {
+            await sim.reboot(body.data.type);
+            return { ok: true };
+        } catch (err) {
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+    });
+
     app.get('/api/sessions', async (req) => {
         const q = req.query as { status?: 'active' | 'completed' | 'aborted'; deviceId?: string; limit?: string };
         return store.listSessions({

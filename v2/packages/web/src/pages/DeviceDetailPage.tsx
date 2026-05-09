@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { ManualControls } from '@/components/ManualControls';
 import { api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
 
@@ -125,6 +126,8 @@ export function DeviceDetailPage() {
                     })}
                 </div>
             </div>
+
+            <ManualControls device={device} />
         </div>
     );
 }
