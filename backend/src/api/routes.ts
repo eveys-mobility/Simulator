@@ -13,9 +13,19 @@ export function createApiRoutes(
     // Get current status
     router.get('/status', (req: Request, res: Response) => {
         const sessions = transactionManager.getAllSessions();
+        const connectorCount = chargePoint.getNumberOfConnectors();
+        const connectors = [];
+        for (let id = 1; id <= connectorCount; id++) {
+            connectors.push({
+                id,
+                status: chargePoint.getConnectorStatus(id),
+                hasActiveSession: transactionManager.hasActiveSession(id),
+            });
+        }
 
         res.json({
             connected: chargePoint.isConnectedToServer(),
+            numberOfConnectors: connectorCount,
             sessions: sessions.map(session => ({
                 connectorId: session.connectorId,
                 transactionId: session.transactionId,
@@ -26,13 +36,7 @@ export function createApiRoutes(
                 duration: session.duration,
                 startTime: session.startTime
             })),
-            connectors: [
-                {
-                    id: 1,
-                    status: chargePoint.getConnectorStatus(1),
-                    hasActiveSession: transactionManager.hasActiveSession(1)
-                }
-            ]
+            connectors,
         });
     });
 
@@ -307,7 +311,7 @@ export function createApiRoutes(
     // Manual consumption testing
     router.post('/manual-consumption', async (req: Request, res: Response) => {
         try {
-            const { energyWh, mode, splitCount } = req.body;
+            const { energyWh, mode, splitCount, connectorId } = req.body;
 
             if (!energyWh || energyWh <= 0) {
                 return res.status(400).json({
@@ -316,9 +320,13 @@ export function createApiRoutes(
                 });
             }
 
-            // Get active session
+            // Get active session — when a connectorId is provided, pin to
+            // that connector; otherwise fall back to the first charging
+            // session (legacy behavior for the single-connector setup).
             const sessions = transactionManager.getAllSessions();
-            const activeSession = sessions.find(s => s.status === 'Charging');
+            const activeSession = typeof connectorId === 'number'
+                ? sessions.find(s => s.status === 'Charging' && s.connectorId === connectorId)
+                : sessions.find(s => s.status === 'Charging');
 
             if (!activeSession) {
                 return res.status(400).json({

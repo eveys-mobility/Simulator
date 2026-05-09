@@ -3,12 +3,14 @@ import { Play, Square, Pause, PlayCircle } from 'lucide-react';
 import { api } from '../services/api';
 
 interface ChargingControlsProps {
+    connectorId: number;
     hasActiveSession: boolean;
     sessionStatus: string | null;
     onAction: (action: string) => void;
 }
 
 export const ChargingControls: React.FC<ChargingControlsProps> = ({
+    connectorId,
     hasActiveSession,
     sessionStatus,
     onAction
@@ -16,69 +18,26 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
     const [idTag, setIdTag] = useState('TEST-TAG-001');
     const [loading, setLoading] = useState(false);
 
-    const handleStartCharging = async () => {
+    const wrap = (label: string, fn: () => Promise<{ success: boolean; message?: string }>) => async () => {
         setLoading(true);
         try {
-            const result = await api.startCharging(1, idTag);
+            const result = await fn();
             if (result.success) {
-                onAction('Charging started successfully');
+                onAction(`Connector ${connectorId}: ${label}`);
             } else {
-                onAction(`Error: ${result.message}`);
+                onAction(`Connector ${connectorId} error: ${result.message ?? 'unknown'}`);
             }
         } catch (error: any) {
-            onAction(`Error: ${error.message}`);
+            onAction(`Connector ${connectorId} error: ${error.message}`);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleStopCharging = async () => {
-        setLoading(true);
-        try {
-            const result = await api.stopCharging(1);
-            if (result.success) {
-                onAction('Charging stopped successfully');
-            } else {
-                onAction(`Error: ${result.message}`);
-            }
-        } catch (error: any) {
-            onAction(`Error: ${error.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handlePauseCharging = async () => {
-        setLoading(true);
-        try {
-            const result = await api.pauseCharging(1);
-            if (result.success) {
-                onAction('Charging paused');
-            } else {
-                onAction(`Error: ${result.message}`);
-            }
-        } catch (error: any) {
-            onAction(`Error: ${error.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleResumeCharging = async () => {
-        setLoading(true);
-        try {
-            const result = await api.resumeCharging(1);
-            if (result.success) {
-                onAction('Charging resumed');
-            } else {
-                onAction(`Error: ${result.message}`);
-            }
-        } catch (error: any) {
-            onAction(`Error: ${error.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const handleStart = wrap('charging started', () => api.startCharging(connectorId, idTag));
+    const handleStop = wrap('charging stopped', () => api.stopCharging(connectorId));
+    const handlePause = wrap('charging paused', () => api.pauseCharging(connectorId));
+    const handleResume = wrap('charging resumed', () => api.resumeCharging(connectorId));
 
     const isPaused = sessionStatus === 'Paused';
     const isCharging = sessionStatus === 'Charging';
@@ -87,16 +46,16 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
         <div className="card">
             <div className="card-header">
                 <h2 className="card-title">
-                    <PlayCircle size={24} />
-                    Charging Controls
+                    <PlayCircle size={20} />
+                    Connector {connectorId} — Controls
                 </h2>
             </div>
             <div className="card-body">
                 {!hasActiveSession && (
                     <div className="input-group">
-                        <label htmlFor="idTag">ID Tag</label>
+                        <label htmlFor={`idTag-${connectorId}`}>ID Tag</label>
                         <input
-                            id="idTag"
+                            id={`idTag-${connectorId}`}
                             type="text"
                             value={idTag}
                             onChange={(e) => setIdTag(e.target.value)}
@@ -109,19 +68,19 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
                     {!hasActiveSession ? (
                         <button
                             className="btn btn-success"
-                            onClick={handleStartCharging}
+                            onClick={handleStart}
                             disabled={loading || !idTag}
                             style={{ flex: 1 }}
                         >
                             <Play size={20} />
-                            Start Charging
+                            Start
                         </button>
                     ) : (
                         <>
                             {isPaused ? (
                                 <button
                                     className="btn btn-success"
-                                    onClick={handleResumeCharging}
+                                    onClick={handleResume}
                                     disabled={loading}
                                     style={{ flex: 1 }}
                                 >
@@ -131,7 +90,7 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
                             ) : isCharging && (
                                 <button
                                     className="btn btn-warning"
-                                    onClick={handlePauseCharging}
+                                    onClick={handlePause}
                                     disabled={loading}
                                     style={{ flex: 1 }}
                                 >
@@ -142,12 +101,12 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
 
                             <button
                                 className="btn btn-danger"
-                                onClick={handleStopCharging}
+                                onClick={handleStop}
                                 disabled={loading}
                                 style={{ flex: 1 }}
                             >
                                 <Square size={20} />
-                                Stop Charging
+                                Stop
                             </button>
                         </>
                     )}

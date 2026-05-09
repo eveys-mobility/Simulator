@@ -1,13 +1,13 @@
 import React from 'react';
 import { Activity, Zap, Clock, Battery } from 'lucide-react';
-import { ChargingSession } from '../services/api';
+import { ChargingSession, ConnectorState } from '../services/api';
 
 interface DashboardProps {
-    connected: boolean;
+    connector: ConnectorState;
     session: ChargingSession | null;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ connected, session }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ connector, session }) => {
     const formatDuration = (seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
@@ -20,11 +20,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ connected, session }) => {
             <div className="card-header">
                 <h2 className="card-title">
                     <Activity size={24} />
-                    Charge Point Status
+                    Connector {connector.id}
                 </h2>
-                <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
+                <span className={`status-badge ${connector.status?.toLowerCase()}`}>
                     <span className="status-dot" />
-                    {connected ? 'Connected' : 'Disconnected'}
+                    {connector.status || 'Unknown'}
                 </span>
             </div>
             <div className="card-body">
@@ -70,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ connected, session }) => {
                     </div>
 
                     <div className="metric">
-                        <div className="metric-label">Status</div>
+                        <div className="metric-label">Session</div>
                         <div className="metric-value" style={{ fontSize: '1.25rem' }}>
                             {session ? (
                                 <span className={`status-badge ${session.status.toLowerCase()}`}>
@@ -92,10 +92,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ connected, session }) => {
                             <div>
                                 <span style={{ color: 'var(--text-muted)' }}>Transaction ID:</span>{' '}
                                 <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{session.transactionId || 'N/A'}</span>
-                            </div>
-                            <div>
-                                <span style={{ color: 'var(--text-muted)' }}>Connector:</span>{' '}
-                                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{session.connectorId}</span>
                             </div>
                             <div>
                                 <span style={{ color: 'var(--text-muted)' }}>ID Tag:</span>{' '}

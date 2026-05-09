@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { ChargingControls } from './components/ChargingControls';
 import { LogsViewer } from './components/LogsViewer';
+import { TraceViewer, TraceEntry } from './components/TraceViewer';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import ConfigurationPanel from './components/ConfigurationPanel';
 import { ManualConsumption } from './components/ManualConsumption';
-import { api, ChargingSession } from './services/api';
+import { api, ChargingSession, ConnectorState } from './services/api';
 import { Wifi, WifiOff, Settings } from 'lucide-react';
 import './index.css';
 
@@ -17,11 +18,17 @@ interface LogEntry {
 
 function App() {
     const [connected, setConnected] = useState(false);
-    const [session, setSession] = useState<ChargingSession | null>(null);
+    const [sessions, setSessions] = useState<ChargingSession[]>([]);
+    const [connectors, setConnectors] = useState<ConnectorState[]>([]);
+    const [statusLoaded, setStatusLoaded] = useState(false);
     const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [traces, setTraces] = useState<TraceEntry[]>([]);
     const [notification, setNotification] = useState<string | null>(null);
     const [connecting, setConnecting] = useState(false);
     const [activeTab, setActiveTab] = useState<'simulator' | 'configuration'>('simulator');
+
+    const sessionFor = (connectorId: number): ChargingSession | null =>
+        sessions.find(s => s.connectorId === connectorId) ?? null;
 
     useEffect(() => {
         // Initial status fetch
@@ -45,11 +52,16 @@ function App() {
         try {
             const status = await api.getStatus();
             setConnected(status.connected);
-            if (status.sessions.length > 0) {
-                setSession(status.sessions[0]);
-            } else {
-                setSession(null);
+            setSessions(status.sessions || []);
+            // Only overwrite the connector list when the payload really
+            // includes it — a partial payload (older code path, an empty
+            // periodic push) must never wipe known state, which used to
+            // make the UI flicker between "2 connectors" and "no
+            // connectors reported" every 2 seconds.
+            if (Array.isArray(status.connectors)) {
+                setConnectors(status.connectors);
             }
+            setStatusLoaded(true);
         } catch (error) {
             console.error('Error fetching status:', error);
         }
@@ -63,16 +75,36 @@ function App() {
             case 'logs':
                 setLogs(message.data);
                 break;
+            case 'trace':
+                // Cap at 2000 to keep the React list bounded — backend
+                // already trims its own buffer to the same size.
+                setTraces(prev => {
+                    const next = [...prev, message.data as TraceEntry];
+                    return next.length > 2000 ? next.slice(-2000) : next;
+                });
+                break;
+            case 'traces':
+                setTraces(message.data || []);
+                break;
             case 'session':
-                setSession(message.data);
+                // Backend pushes a single session — splice it into the
+                // sessions list, replacing any prior entry on the same
+                // connector. Empty/null payload removes the matching one.
+                setSessions(prev => {
+                    if (!message.data) return prev;
+                    const others = prev.filter(s => s.connectorId !== message.data.connectorId);
+                    return [...others, message.data];
+                });
                 break;
             case 'status':
                 setConnected(message.data.connected);
-                if (message.data.sessions.length > 0) {
-                    setSession(message.data.sessions[0]);
-                } else {
-                    setSession(null);
+                if (Array.isArray(message.data.sessions)) {
+                    setSessions(message.data.sessions);
                 }
+                if (Array.isArray(message.data.connectors)) {
+                    setConnectors(message.data.connectors);
+                }
+                setStatusLoaded(true);
                 break;
             case 'event':
                 handleEvent(message.event, message.data);
@@ -214,21 +246,52 @@ function App() {
 
                 {activeTab === 'simulator' ? (
                     <>
-                        <div className="grid">
-                            <Dashboard connected={connected} session={session} />
-                            <ChargingControls
-                                hasActiveSession={!!session}
-                                sessionStatus={session?.status || null}
-                                onAction={showNotification}
-                            />
-                            <ManualConsumption
-                                hasActiveSession={!!session}
-                                onAction={showNotification}
-                            />
+                        <div className="card" style={{ marginBottom: '1.5rem' }}>
+                            <div className="card-header">
+                                <h2 className="card-title">Charge Point</h2>
+                                <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
+                                    <span className="status-dot" />
+                                    {connected ? 'Connected' : 'Disconnected'}
+                                </span>
+                            </div>
+                            <div className="card-body">
+                                <span style={{ color: 'var(--text-muted)' }}>Connectors:</span>{' '}
+                                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{connectors.length || 0}</span>
+                            </div>
                         </div>
+
+                        {connectors.length === 0 ? (
+                            statusLoaded ? (
+                                <div className="alert alert-info">No connectors configured.</div>
+                            ) : null
+                        ) : connectors.map((connector) => {
+                            const sess = sessionFor(connector.id);
+                            return (
+                                <div key={connector.id} style={{ marginBottom: '1.5rem' }}>
+                                    <div className="grid">
+                                        <Dashboard connector={connector} session={sess} />
+                                        <ChargingControls
+                                            connectorId={connector.id}
+                                            hasActiveSession={!!sess}
+                                            sessionStatus={sess?.status ?? null}
+                                            onAction={showNotification}
+                                        />
+                                        <ManualConsumption
+                                            connectorId={connector.id}
+                                            hasActiveSession={!!sess && sess.status === 'Charging'}
+                                            onAction={showNotification}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })}
 
                         <div style={{ marginTop: '1.5rem' }}>
                             <ScenarioPanel onAction={showNotification} />
+                        </div>
+
+                        <div style={{ marginTop: '1.5rem' }}>
+                            <TraceViewer traces={traces} />
                         </div>
 
                         <div style={{ marginTop: '1.5rem' }}>
