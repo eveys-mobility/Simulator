@@ -120,6 +120,46 @@ describe('Store — devices', () => {
         expect(d?.maxPowerKw).toBe(sample.maxPowerKw);
         s.close();
     });
+
+    it('soft-delete hides the device but preserves session history', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        const sessionRowId = s.insertSession({
+            deviceId: sample.id,
+            connectorId: 1,
+            transactionId: 42,
+            idTag: 'TAG',
+            status: 'completed',
+            startedAt: '2026-05-09T12:00:00.000Z',
+            endedAt: '2026-05-09T12:30:00.000Z',
+            endReason: 'Local',
+            energyWh: 1234,
+            peakPowerKw: 7.4,
+        });
+        expect(sessionRowId).toBeGreaterThan(0);
+
+        const removed = s.deleteDevice(sample.id);
+        expect(removed).toBe(true);
+
+        // Hidden from listings + lookups.
+        expect(s.listDevices()).toEqual([]);
+        expect(s.getDevice(sample.id)).toBeNull();
+
+        // But the historical session still resolves — the FK target
+        // exists, just with deleted_at set. Audit trails matter.
+        const sessions = s.listSessions({ deviceId: sample.id });
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.id).toBe(sessionRowId);
+        s.close();
+    });
+
+    it('deleteDevice returns false when called twice', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        expect(s.deleteDevice(sample.id)).toBe(true);
+        expect(s.deleteDevice(sample.id)).toBe(false);
+        s.close();
+    });
 });
 
 describe('Store — app settings', () => {

@@ -313,7 +313,10 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     });
 
     app.delete<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
-        await manager.despawn(req.params.id);
+        // Despawn ends any active session with reason='Other' (operator
+        // delete), then we soft-delete the row so historical sessions
+        // keep their FK target.
+        await manager.despawn(req.params.id, 'Other');
         const removed = store.deleteDevice(req.params.id);
         if (!removed) return reply.code(404).send({ error: 'not found' });
         return reply.code(204).send();
@@ -675,6 +678,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     // ---- WEBSOCKET PUBSUB ----
 
+    /** Frame actions that fire constantly during charging (MeterValues
+     *  every 1–60s × N sessions; Heartbeat every 5min × N devices). The
+     *  WS hub coalesces these — keeping only the latest per (device,
+     *  action) inside the flush window — so a 200-device fleet doesn't
+     *  push hundreds of messages per second to every browser. Anything
+     *  not on this list passes through immediately on the next flush. */
+    const COALESCE_FRAME_ACTIONS = new Set(['MeterValues', 'Heartbeat']);
+    const FLUSH_MS = 100;
+
     app.register(async (instance) => {
         instance.get('/api/ws', { websocket: true }, (socket) => {
             const send = (msg: unknown) => {
@@ -684,14 +696,59 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 type: 'hello',
                 devices: store.listDevices().map((d) => withRuntime(d, manager)),
             });
+
+            // Per-connection coalescing buffers. Flushed on a 100ms
+            // timer — 10 batches/sec is plenty for any live UI, and
+            // each browser tab caps out at that rate regardless of
+            // fleet size.
+            const tickBuffer = new Map<string, unknown>(); // key: deviceId:connectorId
+            const frameBuffer: unknown[] = [];
+            const coalescedFrames = new Map<string, unknown>(); // key: deviceId:action
+            let droppedThisWindow = 0;
+
+            const flush = (): void => {
+                if (tickBuffer.size > 0) {
+                    for (const payload of tickBuffer.values()) send({ type: 'tick', payload });
+                    tickBuffer.clear();
+                }
+                if (frameBuffer.length > 0) {
+                    for (const payload of frameBuffer) send({ type: 'frame', payload });
+                    frameBuffer.length = 0;
+                }
+                if (coalescedFrames.size > 0) {
+                    for (const payload of coalescedFrames.values()) send({ type: 'frame', payload });
+                    coalescedFrames.clear();
+                }
+                if (droppedThisWindow > 0) {
+                    send({ type: 'frames-coalesced', dropped: droppedThisWindow });
+                    droppedThisWindow = 0;
+                }
+            };
+            const flushTimer = setInterval(flush, FLUSH_MS);
+
+            // State and session events are low-volume and the UI
+            // depends on them landing immediately (online flips,
+            // session start/stop) — pass through without coalescing.
             const onState = (e: unknown) => send({ type: 'state', payload: e });
-            const onTick = (e: unknown) => send({ type: 'tick', payload: e });
             const onSession = (e: unknown) => send({ type: 'session', payload: e });
-            // Frame fan-out — every CALL/CALLRESULT/CALLERROR the device
-            // sees, with deviceId attached. Volume is bounded by traffic
-            // (typically a few frames/sec/device); the live trace UI rate-
-            // limits client-side via a ring buffer.
-            const onFrame = (e: unknown) => send({ type: 'frame', payload: { ...(e as object), at: Date.now() } });
+
+            const onTick = (e: unknown) => {
+                const t = e as { deviceId: string; connectorId: number };
+                tickBuffer.set(`${t.deviceId}:${t.connectorId}`, e);
+            };
+
+            const onFrame = (e: unknown) => {
+                const f = e as { deviceId?: string; action?: string };
+                const payload = { ...(e as object), at: Date.now() };
+                if (f.action && COALESCE_FRAME_ACTIONS.has(f.action) && f.deviceId) {
+                    const key = `${f.deviceId}:${f.action}`;
+                    if (coalescedFrames.has(key)) droppedThisWindow += 1;
+                    coalescedFrames.set(key, payload);
+                } else {
+                    frameBuffer.push(payload);
+                }
+            };
+
             const onBenchmarkProgress = (e: unknown) => send({ type: 'benchmark', payload: e });
             const onBenchmarkDone = (e: unknown) => send({ type: 'benchmark-done', payload: e });
             manager.on('state', onState);
@@ -701,6 +758,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             benchmarkBus.on('progress', onBenchmarkProgress);
             benchmarkBus.on('done', onBenchmarkDone);
             socket.on('close', () => {
+                clearInterval(flushTimer);
                 manager.off('state', onState);
                 manager.off('tick', onTick);
                 manager.off('session', onSession);
