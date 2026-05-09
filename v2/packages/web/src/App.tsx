@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { useApplyTheme } from '@/lib/theme';
 import { useLiveWs } from '@/lib/use-live-ws';
 import { BenchmarkPage } from '@/pages/BenchmarkPage';
+import { BenchmarkRunDetailPage } from '@/pages/BenchmarkRunDetailPage';
 import { DeviceDetailPage } from '@/pages/DeviceDetailPage';
 import { DevicesPage } from '@/pages/DevicesPage';
 import { FleetPage } from '@/pages/FleetPage';
@@ -57,6 +58,7 @@ export default function App() {
                     <Route path="/devices/:id" element={<DeviceDetailPage />} />
                     <Route path="/fleet" element={<FleetPage />} />
                     <Route path="/benchmark" element={<BenchmarkPage />} />
+                    <Route path="/benchmark/runs/:id" element={<BenchmarkRunDetailPage />} />
                     <Route path="/sessions" element={<SessionsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                 </Routes>

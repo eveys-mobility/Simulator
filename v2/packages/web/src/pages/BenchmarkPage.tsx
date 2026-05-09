@@ -12,6 +12,7 @@ import {
     XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -412,16 +413,20 @@ function HistoryTab() {
 
 function RunRow({ run }: { run: BenchmarkRun }) {
     return (
-        <tr className="border-b last:border-b-0">
+        <tr className="border-b last:border-b-0 hover:bg-secondary/30">
             <td className="px-4 py-2">
                 <StatusBadge status={run.status} />
             </td>
             <td className="px-4 py-2">
-                <div className="font-medium">{run.scenario.name}</div>
-                <div className="text-xs text-muted-foreground">
-                    #{run.id} · {run.scenario.deviceCount} {run.scenario.deviceMix} ·
-                    {' '}{run.scenario.totalDurationSeconds}s
-                </div>
+                <Link to={`/benchmark/runs/${run.id}`} className="block group">
+                    <div className="font-medium group-hover:text-brand-orange transition-colors">
+                        {run.scenario.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        #{run.id} · {run.scenario.deviceCount} {run.scenario.deviceMix} ·
+                        {' '}{run.scenario.totalDurationSeconds}s
+                    </div>
+                </Link>
             </td>
             <td className="px-4 py-2 text-xs">{new Date(run.startedAt).toLocaleString()}</td>
             <td className="px-4 py-2 text-right tabular-nums">{run.summary?.devicesSpawned ?? '—'}</td>

@@ -39,3 +39,9 @@ docker compose up -d
 - Grafana → <http://localhost:3000> (admin / admin), pre-provisioned with an *OCPP Simulator — Overview* dashboard showing CALL rate, p99 latency, errors, frame throughput, and active devices/sessions.
 
 The simulator runs on the host (`npm run dev:server`); only Prometheus and Grafana run in containers. They scrape `host.docker.internal:3001/metrics` so the dev loop stays fast.
+
+## Benchmarks
+
+The `/benchmark` page in the web UI runs configurable load scenarios (presets: Smoke, Steady, Step ramp, plus a fully custom form) against the configured OCPP gateway. While a run is going, live counters stream over the WebSocket; on completion, the run is persisted in SQLite.
+
+Click a run in the History tab to open `/benchmark/runs/:id` — a detail page with the scenario summary plus six Grafana panels (CALL rate, p99 latency, errors/sec, frame throughput, active sessions, online devices) **embedded as iframes scoped to the run's time window**. Bring the Compose stack up first; Grafana is configured for embedding via `GF_SECURITY_ALLOW_EMBEDDING=true`.

@@ -34,6 +34,11 @@ services:
             GF_SECURITY_ADMIN_PASSWORD: admin
             GF_AUTH_ANONYMOUS_ENABLED: 'true'
             GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+            # Allow the simulator UI (and any other localhost origin) to
+            # embed Grafana panels as iframes. The Benchmark run detail
+            # page uses this to scope panels to a run's time window.
+            GF_SECURITY_ALLOW_EMBEDDING: 'true'
+            GF_SECURITY_COOKIE_SAMESITE: 'none'
         volumes:
             - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
             - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
