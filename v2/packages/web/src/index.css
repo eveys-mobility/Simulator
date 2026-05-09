@@ -114,3 +114,17 @@
         font-variant-numeric: tabular-nums;
     }
 }
+
+/*
+ * Pulse animation for live indicators (online state, charging connector).
+ * Subtle: 2s cycle, ring fade only — no scale to avoid layout thrash.
+ */
+@keyframes ocpp-sim-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 hsl(var(--brand-green) / 0.5); }
+    50%      { box-shadow: 0 0 0 6px hsl(var(--brand-green) / 0); }
+}
+
+.pulse-live {
+    animation: ocpp-sim-pulse 2s ease-out infinite;
+    border-radius: 9999px;
+}

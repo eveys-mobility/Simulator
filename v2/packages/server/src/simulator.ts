@@ -312,21 +312,23 @@ export class Simulator extends EventEmitter {
     /**
      * Inject a fault on a connector. Optional `clearAfterSeconds` schedules
      * an auto-clear back to Available. If a session is active, it's stopped
-     * with reason=PowerLoss before the connector flips to Faulted.
+     * with the given `stopReason` (default `PowerLoss`) before the connector
+     * flips to Faulted.
      */
     async injectFault(args: {
         connectorId: number;
         errorCode?: string;
         clearAfterSeconds?: number;
+        stopReason?: string;
     }): Promise<void> {
-        const { connectorId, errorCode = 'OtherError', clearAfterSeconds } = args;
+        const { connectorId, errorCode = 'OtherError', clearAfterSeconds, stopReason = 'PowerLoss' } = args;
         const c = this.requireConnector(connectorId);
         if (c.faultClearTimer) {
             clearTimeout(c.faultClearTimer);
             c.faultClearTimer = null;
         }
         if (c.transactionId !== null) {
-            await this.stopSession(connectorId, 'PowerLoss');
+            await this.stopSession(connectorId, stopReason);
         }
         c.status = 'Faulted';
         this.emit('state', { connectorId, status: 'Faulted' });
@@ -359,17 +361,36 @@ export class Simulator extends EventEmitter {
 
     /**
      * E-stop: hit the big red button. Aborts every running session
-     * with reason=EmergencyStop, flips every connector to Faulted with
-     * `EmergencyStop` error code. The CSMS sees the storm.
+     * with reason=EmergencyStop, flips every connector to Faulted.
+     * OCPP doesn't have a dedicated EmergencyStop error code, so the
+     * connector-side StatusNotification uses OtherError; the CSMS
+     * recognizes the situation by the StopTransaction reason.
      */
     async emergencyStop(): Promise<void> {
         for (const id of this.connectors.keys()) {
-            await this.injectFault({ connectorId: id, errorCode: 'OtherError' });
-            // OCPP doesn't have a dedicated EmergencyStop error code;
-            // the canonical signal is the StopTransaction reason — which
-            // the inner stopSession() emits. Faulted + OtherError covers
-            // the connector-side StatusNotification.
+            await this.injectFault({
+                connectorId: id,
+                errorCode: 'OtherError',
+                stopReason: 'EmergencyStop',
+            });
         }
+    }
+
+    /**
+     * Stop every active session on this device cleanly (reason=Local).
+     * Connectors return to Available; no fault. Used by the fleet-wide
+     * "Stop all" path which doesn't want to fault every charger just to
+     * end ongoing sessions.
+     */
+    async stopAllSessions(): Promise<number> {
+        let stopped = 0;
+        for (const [id, c] of this.connectors.entries()) {
+            if (c.transactionId !== null) {
+                await this.stopSession(id, 'Local').catch((e) => this.emit('error', e));
+                stopped++;
+            }
+        }
+        return stopped;
     }
 
     /**

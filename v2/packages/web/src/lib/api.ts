@@ -98,16 +98,39 @@ export const api = {
 
     fleetEmergencyStop: () => http<{ stopped: number }>('POST', '/fleet/emergency-stop'),
 
+    fleetStopAll: () =>
+        http<{ devices: number; sessionsStopped: number }>('POST', '/fleet/stop-all'),
+
+    resetDatabase: () =>
+        http<{ ok: true; devices: number }>('POST', '/settings/reset', { confirm: 'DELETE' }),
+
     getSettings: () => http<{ defaultOcppUrl: string }>('GET', '/settings'),
     updateSettings: (body: { defaultOcppUrl: string }) =>
         http<{ defaultOcppUrl: string }>('PUT', '/settings', body),
 
-    listSessions: (q: { status?: 'active' | 'completed' | 'aborted'; deviceId?: string; limit?: number } = {}) => {
+    listSessions: (
+        q: {
+            status?: 'active' | 'completed' | 'aborted';
+            deviceId?: string;
+            idTag?: string;
+            since?: string;
+            until?: string;
+            limit?: number;
+            offset?: number;
+        } = {},
+    ) => {
         const params = new URLSearchParams();
         if (q.status) params.set('status', q.status);
         if (q.deviceId) params.set('deviceId', q.deviceId);
+        if (q.idTag) params.set('idTag', q.idTag);
+        if (q.since) params.set('since', q.since);
+        if (q.until) params.set('until', q.until);
         if (q.limit !== undefined) params.set('limit', String(q.limit));
+        if (q.offset !== undefined) params.set('offset', String(q.offset));
         const qs = params.toString();
-        return http<Session[]>('GET', `/sessions${qs ? '?' + qs : ''}`);
+        return http<{ sessions: Session[]; total: number; limit: number; offset: number }>(
+            'GET',
+            `/sessions${qs ? '?' + qs : ''}`,
+        );
     },
 };

@@ -160,22 +160,37 @@ export class Store {
             .run(args);
     }
 
-    listSessions(filter: { deviceId?: string; status?: Session['status']; limit?: number } = {}): Session[] {
-        const where: string[] = [];
-        const params: Record<string, unknown> = {};
-        if (filter.deviceId) {
-            where.push('device_id = @deviceId');
-            params.deviceId = filter.deviceId;
-        }
-        if (filter.status) {
-            where.push('status = @status');
-            params.status = filter.status;
-        }
-        const sql = `SELECT * FROM sessions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-                     ORDER BY started_at DESC LIMIT @limit`;
+    listSessions(filter: {
+        deviceId?: string;
+        status?: Session['status'];
+        idTag?: string;
+        since?: string;
+        until?: string;
+        limit?: number;
+        offset?: number;
+    } = {}): Session[] {
+        const { sql, params } = buildSessionWhere(filter);
         params.limit = filter.limit ?? 100;
-        const rows = this.db.prepare(sql).all(params) as SessionRow[];
+        params.offset = filter.offset ?? 0;
+        const rows = this.db
+            .prepare(`SELECT * FROM sessions ${sql} ORDER BY started_at DESC LIMIT @limit OFFSET @offset`)
+            .all(params) as SessionRow[];
         return rows.map(rowToSession);
+    }
+
+    /** Total count for the same filter — used by the UI for pagination. */
+    countSessions(filter: {
+        deviceId?: string;
+        status?: Session['status'];
+        idTag?: string;
+        since?: string;
+        until?: string;
+    } = {}): number {
+        const { sql, params } = buildSessionWhere(filter);
+        const row = this.db.prepare(`SELECT COUNT(*) as n FROM sessions ${sql}`).get(params) as
+            | { n: number }
+            | undefined;
+        return row?.n ?? 0;
     }
 
     abortOrphanedSessions(): number {
@@ -230,6 +245,26 @@ export class Store {
             )
             .run(key, value);
     }
+
+    /**
+     * Drop every row from every table, keeping the schema in place.
+     * The destructive path: used by POST /api/settings/reset. The
+     * caller must despawn every Simulator first (so no live writes
+     * race the truncates) and respawn nothing — there's nothing to
+     * spawn after this returns.
+     */
+    reset(): void {
+        const tx = this.db.transaction(() => {
+            this.db.exec(`
+                DELETE FROM sessions;
+                DELETE FROM device_config;
+                DELETE FROM devices;
+                DELETE FROM app_settings;
+                DELETE FROM sqlite_sequence WHERE name IN ('sessions');
+            `);
+        });
+        tx();
+    }
 }
 
 interface DeviceRow {
@@ -262,6 +297,38 @@ function rowToDevice(r: DeviceRow): Device {
         dcProfile: r.dc_profile ? (JSON.parse(r.dc_profile) as DCBatteryProfile) : undefined,
         createdAt: r.created_at,
     };
+}
+
+function buildSessionWhere(filter: {
+    deviceId?: string;
+    status?: Session['status'];
+    idTag?: string;
+    since?: string;
+    until?: string;
+}): { sql: string; params: Record<string, unknown> } {
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (filter.deviceId) {
+        where.push('device_id = @deviceId');
+        params.deviceId = filter.deviceId;
+    }
+    if (filter.status) {
+        where.push('status = @status');
+        params.status = filter.status;
+    }
+    if (filter.idTag) {
+        where.push('id_tag LIKE @idTag');
+        params.idTag = `%${filter.idTag}%`;
+    }
+    if (filter.since) {
+        where.push('started_at >= @since');
+        params.since = filter.since;
+    }
+    if (filter.until) {
+        where.push('started_at <= @until');
+        params.until = filter.until;
+    }
+    return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
 interface SessionRow {

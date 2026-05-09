@@ -221,10 +221,10 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
         onSuccess: (r) => flash(`HeartbeatInterval = ${r.seconds}s on ${r.updated} device(s).`),
     });
 
-    const eStop = useMutation({
-        mutationFn: () => api.fleetEmergencyStop(),
+    const stopAll = useMutation({
+        mutationFn: () => api.fleetStopAll(),
         onSuccess: (r) => {
-            flash(`Emergency-stopped ${r.stopped} device(s).`);
+            flash(`Stopped ${r.sessionsStopped} session(s) across ${r.devices} device(s).`);
             onSuccess();
         },
     });
@@ -312,20 +312,21 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
 
                 <Separator />
 
-                <Section title="Emergency stop">
+                <Section title="Stop sessions">
                     <Button
                         variant="destructive"
                         onClick={() => {
-                            if (confirm('Emergency-stop every connector on every device?')) eStop.mutate();
+                            if (confirm('Stop every active charging session across the fleet?')) stopAll.mutate();
                         }}
-                        disabled={eStop.isPending}
+                        disabled={stopAll.isPending}
                     >
                         <AlertOctagon className="h-4 w-4" />
-                        Emergency stop all
+                        Stop all sessions
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                        Faults every connector and aborts any active session with reason=EmergencyStop. Recovery
-                        requires clearing each fault individually from the device page.
+                        Ends every active charging session with reason=Local. Connectors return to Available; no
+                        fault. Use the per-device <span className="font-medium">Emergency stop</span> button for
+                        the actual fault-and-stop scenario.
                     </p>
                 </Section>
 

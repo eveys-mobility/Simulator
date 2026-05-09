@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Save } from 'lucide-react';
+import { AlertTriangle, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -115,6 +115,76 @@ export function SettingsPage() {
                     </form>
                 </CardContent>
             </Card>
+
+            <ResetDatabaseCard />
         </div>
+    );
+}
+
+function ResetDatabaseCard() {
+    const qc = useQueryClient();
+    const [typed, setTyped] = useState('');
+    const [done, setDone] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const reset = useMutation({
+        mutationFn: () => api.resetDatabase(),
+        onSuccess: () => {
+            setDone(true);
+            setTyped('');
+            setError(null);
+            // Wipe every cached query so the UI snaps back to empty state.
+            qc.invalidateQueries();
+            setTimeout(() => setDone(false), 4000);
+        },
+        onError: (e) => setError(e instanceof Error ? e.message : String(e)),
+    });
+
+    const armed = typed === 'DELETE';
+
+    return (
+        <Card className="border-destructive/40">
+            <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-4 w-4" /> Danger zone
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                    Reset the database. Every device, session, OCPP-config row and app setting is dropped.
+                    Running OCPP connections are torn down. The OCPP gateway URL falls back to the
+                    <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">OCPP_URL</code>
+                    env var, or <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">ws://localhost:19000</code>
+                    if unset.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="flex-1 space-y-1">
+                        <Label htmlFor="reset-confirm" className="text-xs text-muted-foreground">
+                            Type <span className="font-mono font-bold text-destructive">DELETE</span> to confirm
+                        </Label>
+                        <Input
+                            id="reset-confirm"
+                            value={typed}
+                            onChange={(e) => {
+                                setTyped(e.target.value);
+                                setError(null);
+                            }}
+                            placeholder="DELETE"
+                            className="font-mono"
+                        />
+                    </div>
+                    <Button
+                        variant="destructive"
+                        disabled={!armed || reset.isPending}
+                        onClick={() => reset.mutate()}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                        {reset.isPending ? 'Resetting…' : 'Reset database'}
+                    </Button>
+                </div>
+                {done && <p className="text-sm text-brand-green">Database reset.</p>}
+                {error && <p className="text-sm text-destructive">{error}</p>}
+            </CardContent>
+        </Card>
     );
 }
