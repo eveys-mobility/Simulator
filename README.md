@@ -45,3 +45,38 @@ The simulator runs on the host (`npm run dev:server`); only Prometheus and Grafa
 The `/benchmark` page in the web UI runs configurable load scenarios (presets: Smoke, Steady, Step ramp, plus a fully custom form) against the configured OCPP gateway. While a run is going, live counters stream over the WebSocket; on completion, the run is persisted in SQLite.
 
 Click a run in the History tab to open `/benchmark/runs/:id` — a detail page with the scenario summary plus six Grafana panels (CALL rate, p99 latency, errors/sec, frame throughput, active sessions, online devices) **embedded as iframes scoped to the run's time window**. Bring the Compose stack up first; Grafana is configured for embedding via `GF_SECURITY_ALLOW_EMBEDDING=true`.
+
+## Deploy
+
+A multi-stage `Dockerfile` at `v2/Dockerfile` produces one image that runs the server **and** serves the built web bundle on a single port.
+
+```sh
+cd v2
+docker build -t ocpp-sim .
+docker run --rm -d -p 3001:3001 \
+    -v ocpp-sim-data:/data \
+    -e OCPP_URL=ws://gateway.example:19000 \
+    -e AUTH_TOKEN=$(openssl rand -hex 32) \
+    --name ocpp-sim ocpp-sim
+```
+
+UI + API at <http://localhost:3001>; SQLite persists to the named volume.
+
+### Environment variables
+
+| Var | Default (image) | Default (dev) | Notes |
+|---|---|---|---|
+| `PORT` | `3001` | `3001` | HTTP/WS listen port |
+| `HOST` | `0.0.0.0` | `127.0.0.1` | Bind address. Dev defaults to loopback so a fresh checkout doesn't expose itself on the LAN. |
+| `OCPP_URL` | `ws://localhost:19000` | same | Default gateway for new devices. The Settings page persists overrides. |
+| `DB_PATH` | `/data/sim.sqlite` | `./data/sim.sqlite` | SQLite file. The Docker volume keeps it across restarts. |
+| `AUTH_TOKEN` | unset | unset | When set, every `/api/*` and `/metrics` request needs `Authorization: Bearer <token>`. `/api/health` stays open for health probes. |
+| `WEB_DIST_DIR` | `/app/packages/web/dist` | unset | Directory the server hands to fastify-static. Set automatically inside the image; leave unset in dev (Vite serves the SPA on `:5173`). |
+
+### Auth
+
+`AUTH_TOKEN` is a single shared secret. It gates the REST API, the WebSocket pub/sub, and `/metrics`. `/api/health` stays open so external probes don't need credentials. The web UI doesn't currently know about the token — for an authenticated deploy, put a reverse proxy in front and have it inject the header (or run with `AUTH_TOKEN` unset behind a private network).
+
+### Reverse proxy
+
+The server speaks plain HTTP and WS. For TLS, a public hostname, or auth that the SPA can speak: front it with nginx / Caddy / Traefik and forward `/` (HTTP) plus `/api/ws` (WebSocket upgrade) to the container.

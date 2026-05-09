@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/dist
+**/.vite
+**/data
+*.log
+*.sqlite
+*.sqlite-*
+.git
+observability
+docker-compose.yml

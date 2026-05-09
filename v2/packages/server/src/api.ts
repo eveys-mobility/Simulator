@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { resolve as resolvePath } from 'node:path';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import {
     AcWiringSchema,
@@ -24,12 +26,37 @@ interface BuildArgs {
     store: Store;
     manager: DeviceManager;
     defaultOcppUrl: string;
+    /** When set, every /api/* and /metrics request must carry
+     *  `Authorization: Bearer <token>`. /api/health stays open. */
+    authToken?: string | null;
+    /** Absolute path to the web bundle. When set, Fastify-static
+     *  serves /assets and SPA-fallback to index.html. */
+    webDistDir?: string | null;
 }
 
-export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs) {
+export async function buildServer({ store, manager, defaultOcppUrl, authToken, webDistDir }: BuildArgs) {
     const app = Fastify({ logger: { level: 'info' } });
     await app.register(cors, { origin: true });
     await app.register(websocket);
+
+    // Bearer-token gate. When AUTH_TOKEN is set, every /api/* and
+    // /metrics request needs the right token. /api/health stays open
+    // so health probes don't require credentials.
+    if (authToken) {
+        app.addHook('onRequest', async (req, reply) => {
+            const url = req.url ?? '';
+            const isProtected =
+                (url.startsWith('/api/') || url.startsWith('/metrics')) && url !== '/api/health';
+            if (!isProtected) return;
+            const header = req.headers.authorization ?? '';
+            const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+            // Constant-time-ish compare: lengths first, then byte-equal.
+            const ok = presented.length === authToken.length && presented === authToken;
+            if (!ok) {
+                reply.code(401).send({ error: 'unauthorized' });
+            }
+        });
+    }
 
     // Mutable so the Settings PUT can update what new devices default to.
     let currentDefaultOcppUrl = defaultOcppUrl;
@@ -752,6 +779,30 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         manager.emit('state', { deviceId: '__reset__', online: false });
         return { ok: true, devices: 0 };
     });
+
+    // ---- STATIC WEB BUNDLE (production) ----
+    //
+    // Registered last so /api/* and /metrics route handlers match
+    // first. Falls back to index.html for any GET that doesn't match
+    // a static asset — that's the SPA-fallback behavior react-router
+    // needs for deep links to /devices/:id, /benchmark/runs/:id, etc.
+    if (webDistDir) {
+        const root = resolvePath(webDistDir);
+        await app.register(fastifyStatic, {
+            root,
+            prefix: '/',
+            wildcard: false,
+        });
+        app.setNotFoundHandler((req, reply) => {
+            // Don't SPA-fallback for /api/* — those should 404 cleanly.
+            const url = req.url ?? '';
+            if (url.startsWith('/api/') || url === '/metrics') {
+                reply.code(404).send({ error: 'not found' });
+                return;
+            }
+            reply.sendFile('index.html');
+        });
+    }
 
     return app;
 }

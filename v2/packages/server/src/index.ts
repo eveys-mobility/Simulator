@@ -5,9 +5,15 @@ import { DeviceManager } from './device-manager.js';
 import { Store } from './store.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
-const HOST = process.env.HOST ?? '0.0.0.0';
+// Default to loopback. The simulator is a development / benchmarking
+// tool; binding to 0.0.0.0 by default would expose every device's
+// state and the metrics endpoint to anyone on the LAN. Set HOST=0.0.0.0
+// explicitly when running in a container.
+const HOST = process.env.HOST ?? '127.0.0.1';
 const DB_PATH = resolve(process.env.DB_PATH ?? './data/sim.sqlite');
 const OCPP_URL_ENV = process.env.OCPP_URL ?? 'ws://localhost:19000';
+const AUTH_TOKEN = process.env.AUTH_TOKEN?.trim() || null;
+const WEB_DIST_DIR = process.env.WEB_DIST_DIR?.trim() || null;
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const store = new Store(DB_PATH);
@@ -70,12 +76,20 @@ for (const d of store.listDevices()) {
     manager.spawn(d).catch((err) => console.error(`[server] failed to spawn ${d.id}:`, err));
 }
 
-const app = await buildServer({ store, manager, defaultOcppUrl: initialOcppUrl });
+const app = await buildServer({
+    store,
+    manager,
+    defaultOcppUrl: initialOcppUrl,
+    authToken: AUTH_TOKEN,
+    webDistDir: WEB_DIST_DIR,
+});
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`[server] listening on http://${HOST}:${PORT}`);
 console.log(`[server] db: ${DB_PATH}`);
 console.log(`[server] default OCPP url: ${initialOcppUrl}`);
+console.log(`[server] auth: ${AUTH_TOKEN ? 'bearer-token required' : 'none (dev mode)'}`);
+if (WEB_DIST_DIR) console.log(`[server] web dist: ${WEB_DIST_DIR}`);
 
 const shutdown = async () => {
     console.log('[server] shutting down…');
