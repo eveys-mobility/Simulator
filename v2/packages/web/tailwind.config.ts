@@ -36,11 +36,22 @@ const config: Config = {
                     DEFAULT: 'hsl(var(--card))',
                     foreground: 'hsl(var(--card-foreground))',
                 },
+                brand: {
+                    navy: 'hsl(var(--brand-navy))',
+                    blue: 'hsl(var(--brand-blue))',
+                    gold: 'hsl(var(--brand-gold))',
+                    cream: 'hsl(var(--brand-cream))',
+                    coal: 'hsl(var(--brand-coal))',
+                },
             },
             borderRadius: {
                 lg: 'var(--radius)',
                 md: 'calc(var(--radius) - 2px)',
                 sm: 'calc(var(--radius) - 4px)',
+            },
+            fontFamily: {
+                sans: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'],
+                display: ['Clash Display', 'Inter Variable', 'system-ui', 'sans-serif'],
             },
         },
     },

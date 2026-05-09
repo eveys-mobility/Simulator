@@ -1,30 +1,100 @@
+@import '@fontsource-variable/inter/index.css';
+/*
+ * Clash Display is hosted by the foundry — pulled in via the official
+ * fontshare embed so we don't have to license-redistribute a font
+ * binary into the repo. Falls back to system serifs gracefully.
+ */
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Brand palette — anchored on the Eveys site (eveys.com).
+ *  Navy   #0a102f   primary surface
+ *  Blue   #3147ff   accent / CTA
+ *  Gold   #f4b905   secondary accent
+ *  Cream  #fff4d9   muted highlight
+ *  Off-w  #fdfbf9   foreground on dark
+ *  Coal   #221f1a   near-black for borders / text on light
+ *
+ * Stored as HSL components (no `hsl(...)` wrapper) so Tailwind utilities
+ * can compose alpha modifiers — `bg-primary/40` etc.
+ */
 @layer base {
     :root {
-        --background: 222 47% 11%;
-        --foreground: 213 31% 91%;
-        --card: 222 47% 14%;
-        --card-foreground: 213 31% 91%;
-        --primary: 217 91% 60%;
-        --primary-foreground: 222 47% 11%;
-        --secondary: 217 33% 18%;
-        --secondary-foreground: 213 31% 91%;
-        --muted: 217 33% 18%;
-        --muted-foreground: 215 20% 65%;
-        --accent: 217 33% 18%;
-        --accent-foreground: 213 31% 91%;
-        --destructive: 0 63% 50%;
-        --destructive-foreground: 213 31% 91%;
-        --border: 217 33% 22%;
-        --input: 217 33% 22%;
-        --ring: 217 91% 60%;
-        --radius: 0.5rem;
+        /* Light theme — for completeness; the app currently runs dark by default. */
+        --background: 36 50% 98%;
+        --foreground: 228 65% 11%;
+        --card: 0 0% 100%;
+        --card-foreground: 228 65% 11%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 228 65% 11%;
+        --primary: 234 100% 60%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 46 100% 92%;
+        --secondary-foreground: 228 65% 11%;
+        --muted: 36 30% 94%;
+        --muted-foreground: 228 30% 35%;
+        --accent: 46 95% 49%;
+        --accent-foreground: 228 65% 11%;
+        --destructive: 0 70% 52%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 36 20% 88%;
+        --input: 36 20% 88%;
+        --ring: 234 100% 60%;
+        --radius: 0.625rem;
+
+        --brand-navy: 228 65% 11%;
+        --brand-blue: 234 100% 60%;
+        --brand-gold: 46 95% 49%;
+        --brand-cream: 46 100% 92%;
+        --brand-coal: 33 14% 12%;
     }
+
+    /* Dark theme — the simulator's default. Built on the navy base
+     * so the gateway-style monitoring feel is preserved while the
+     * accents come straight from the brand. */
+    .dark,
+    :root[data-theme='dark'],
+    :root {
+        --background: 228 65% 7%;            /* deeper than navy for canvas */
+        --foreground: 36 50% 98%;
+        --card: 228 50% 11%;                 /* navy proper */
+        --card-foreground: 36 50% 98%;
+        --popover: 228 50% 11%;
+        --popover-foreground: 36 50% 98%;
+        --primary: 234 100% 65%;             /* brand blue, slightly lifted for dark bg */
+        --primary-foreground: 228 65% 7%;
+        --secondary: 228 40% 18%;
+        --secondary-foreground: 36 50% 98%;
+        --muted: 228 35% 16%;
+        --muted-foreground: 228 20% 65%;
+        --accent: 46 95% 55%;                /* brand gold */
+        --accent-foreground: 228 65% 7%;
+        --destructive: 0 70% 55%;
+        --destructive-foreground: 36 50% 98%;
+        --border: 228 35% 20%;
+        --input: 228 35% 20%;
+        --ring: 234 100% 65%;
+    }
+
     body {
         @apply bg-background text-foreground antialiased;
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+        font-feature-settings: 'cv11', 'ss01', 'ss03';
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Clash Display', 'Inter Variable', system-ui, sans-serif;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+
+    /* Use tabular numerals for any number we expect to scrub —
+     * power, energy, latency, kWh. Keeps columns from shifting. */
+    .tabular-nums {
+        font-variant-numeric: tabular-nums;
     }
 }
