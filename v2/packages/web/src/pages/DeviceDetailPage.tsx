@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { ManualControls } from '@/components/ManualControls';
+import { TraceViewer } from '@/components/TraceViewer';
 import { api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
 
@@ -128,6 +129,8 @@ export function DeviceDetailPage() {
             </div>
 
             <ManualControls device={device} />
+
+            <TraceViewer deviceId={device.id} />
         </div>
     );
 }

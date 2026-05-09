@@ -373,13 +373,20 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             const onState = (e: unknown) => send({ type: 'state', payload: e });
             const onTick = (e: unknown) => send({ type: 'tick', payload: e });
             const onSession = (e: unknown) => send({ type: 'session', payload: e });
+            // Frame fan-out — every CALL/CALLRESULT/CALLERROR the device
+            // sees, with deviceId attached. Volume is bounded by traffic
+            // (typically a few frames/sec/device); the live trace UI rate-
+            // limits client-side via a ring buffer.
+            const onFrame = (e: unknown) => send({ type: 'frame', payload: { ...(e as object), at: Date.now() } });
             manager.on('state', onState);
             manager.on('tick', onTick);
             manager.on('session', onSession);
+            manager.on('frame', onFrame);
             socket.on('close', () => {
                 manager.off('state', onState);
                 manager.off('tick', onTick);
                 manager.off('session', onSession);
+                manager.off('frame', onFrame);
             });
         });
     });

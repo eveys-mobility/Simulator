@@ -39,7 +39,22 @@ export function SettingsPage() {
         },
     });
 
-    const dirty = data ? draft !== data.defaultOcppUrl : false;
+    // Enable Save whenever the field holds a syntactically valid URL,
+    // regardless of whether it differs from the persisted value. The
+    // server is idempotent, and "always clickable when valid" is less
+    // confusing than a button that reports "no change to save" via a
+    // disabled state that the user has to reverse-engineer.
+    const trimmed = draft.trim();
+    let isValidUrl = false;
+    try {
+        if (trimmed) {
+            new URL(trimmed);
+            isValidUrl = true;
+        }
+    } catch {
+        isValidUrl = false;
+    }
+    const canSave = !isLoading && isValidUrl && !save.isPending;
 
     return (
         <div className="space-y-6 max-w-2xl">
@@ -63,14 +78,11 @@ export function SettingsPage() {
                     <form
                         onSubmit={(e) => {
                             e.preventDefault();
-                            if (!dirty) return;
-                            try {
-                                new URL(draft);
-                            } catch {
-                                setError('Not a valid URL');
+                            if (!isValidUrl) {
+                                setError('Enter a valid URL (e.g. ws://gateway.example:19000)');
                                 return;
                             }
-                            save.mutate(draft);
+                            save.mutate(trimmed);
                         }}
                         className="space-y-2"
                     >
@@ -88,7 +100,7 @@ export function SettingsPage() {
                                 disabled={isLoading || save.isPending}
                                 className="font-mono text-sm"
                             />
-                            <Button type="submit" disabled={!dirty || save.isPending}>
+                            <Button type="submit" disabled={!canSave}>
                                 <Save className="h-4 w-4" />
                                 {save.isPending ? 'Saving…' : 'Save'}
                             </Button>
