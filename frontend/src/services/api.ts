@@ -2,6 +2,7 @@ const API_BASE_URL = '/api';
 const WS_URL = 'ws://localhost:3001/ws';
 
 export type PhaseMode = 'balanced' | 'imbalanced' | 'single-phase';
+export type ConnectorType = 'AC' | 'DC';
 
 export interface PhaseReading {
     voltage_v: number;
@@ -16,6 +17,24 @@ export interface PhaseFrame {
     total_p_kw: number;
 }
 
+export interface DCFrame {
+    soc_pct: number;
+    voltage_v: number;
+    current_a: number;
+    power_w: number;
+    delivered_wh: number;
+    completed: boolean;
+}
+
+export interface DCBatteryProfile {
+    capacity_kwh: number;
+    charger_max_kw: number;
+    nominal_voltage_v?: number;
+    initial_soc_pct: number;
+    target_soc_pct?: number;
+    ramp_up_seconds?: number;
+}
+
 export interface ChargingSession {
     connectorId: number;
     transactionId?: number;
@@ -26,13 +45,17 @@ export interface ChargingSession {
     duration: number;
     startTime: string;
     phaseFrame?: PhaseFrame | null;
+    dcFrame?: DCFrame | null;
+    socPercent?: number;
 }
 
 export interface ConnectorState {
     id: number;
     status: string;
     hasActiveSession: boolean;
+    connectorType?: ConnectorType;
     phaseMode?: PhaseMode;
+    dcProfile?: DCBatteryProfile;
 }
 
 export interface Status {
@@ -230,6 +253,24 @@ class ApiService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode })
+        });
+        return response.json();
+    }
+
+    async setConnectorType(connectorId: number, type: ConnectorType): Promise<any> {
+        const response = await fetch(`${API_BASE_URL}/connectors/${connectorId}/type`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type })
+        });
+        return response.json();
+    }
+
+    async setDCProfile(connectorId: number, partial: Partial<DCBatteryProfile>): Promise<any> {
+        const response = await fetch(`${API_BASE_URL}/connectors/${connectorId}/dc-profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(partial)
         });
         return response.json();
     }

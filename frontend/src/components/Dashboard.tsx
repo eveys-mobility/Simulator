@@ -2,6 +2,7 @@ import React from 'react';
 import { Activity, Zap, Clock, Battery } from 'lucide-react';
 import { ChargingSession, ConnectorState } from '../services/api';
 import { PhaseReadout } from './PhaseReadout';
+import { DCReadout } from './DCReadout';
 
 interface DashboardProps {
     connector: ConnectorState;
@@ -16,12 +17,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ connector, session }) => {
         return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const isDC = connector.connectorType === 'DC';
+    const maxKw = isDC ? (connector.dcProfile?.charger_max_kw ?? 100) : 22;
+
     return (
         <div className="card">
             <div className="card-header">
                 <h2 className="card-title">
                     <Activity size={24} />
                     Connector {connector.id}
+                    <span style={{
+                        marginLeft: '0.5rem',
+                        fontSize: '0.7rem',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '4px',
+                        background: isDC ? 'var(--accent-warning, #f59e0b)' : 'var(--accent-primary, #3b82f6)',
+                        color: 'white',
+                        verticalAlign: 'middle',
+                    }}>
+                        {isDC ? 'DC' : 'AC'}
+                    </span>
                 </h2>
                 <span className={`status-badge ${connector.status?.toLowerCase()}`}>
                     <span className="status-dot" />
@@ -43,7 +58,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ connector, session }) => {
                             <div className="progress-bar">
                                 <div
                                     className="progress-fill"
-                                    style={{ width: `${(session.powerKw / 22) * 100}%` }}
+                                    style={{ width: `${(session.powerKw / maxKw) * 100}%` }}
                                 />
                             </div>
                         )}
@@ -84,7 +99,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ connector, session }) => {
                     </div>
                 </div>
 
-                {session && <PhaseReadout frame={session.phaseFrame} />}
+                {session && (isDC
+                    ? <DCReadout frame={session.dcFrame} profile={connector.dcProfile} />
+                    : <PhaseReadout frame={session.phaseFrame} />
+                )}
 
                 {session && (
                     <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>

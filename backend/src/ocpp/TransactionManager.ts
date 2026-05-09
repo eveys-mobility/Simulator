@@ -8,7 +8,8 @@ import {
     Measurand,
     UnitOfMeasure,
     ReadingContext,
-    Phase
+    Phase,
+    Location,
 } from '../models/ChargingSession';
 import { ConnectorStatus } from '../models/Configuration';
 import { ConfigurationManager } from './ConfigurationManager';
@@ -18,8 +19,15 @@ import { TransactionHistory } from './TransactionHistory';
 import { AuthorizationManager } from './AuthorizationManager';
 import { logger } from '../utils/logger';
 import { computePhaseFrame, parsePhaseMode, PhaseMode, PhaseFrame } from './PhaseModel';
+import { computeDCFrame, DCBatteryProfile, DCFrame } from './DCModel';
 
 const COMPONENT = 'TransactionManager';
+
+export type ConnectorType = 'AC' | 'DC';
+
+function parseConnectorType(raw: string | undefined | null): ConnectorType {
+    return raw === 'DC' ? 'DC' : 'AC';
+}
 
 export class TransactionManager extends EventEmitter {
     private chargePoint: ChargePoint;
@@ -42,6 +50,13 @@ export class TransactionManager extends EventEmitter {
      *  so the API status endpoint and the UI can render a per-phase
      *  readout without recomputing. */
     private connectorLastPhaseFrame: Map<number, PhaseFrame> = new Map();
+    /** Per-connector DC profile — pack capacity, charger rating,
+     *  initial SoC, etc. Lazy-loaded from config when getDCProfile()
+     *  is first called. AC connectors don't use these. */
+    private connectorDCProfile: Map<number, DCBatteryProfile> = new Map();
+    /** Last DC frame per connector. Same role as
+     *  connectorLastPhaseFrame but for DC sessions. */
+    private connectorLastDCFrame: Map<number, DCFrame> = new Map();
 
     constructor(chargePoint: ChargePoint, configManager: ConfigurationManager, chargePointId: string, maxPowerKw: number, meterValueIntervalSeconds: number = 60) {
         super();
@@ -115,6 +130,62 @@ export class TransactionManager extends EventEmitter {
 
     public getLastPhaseFrame(connectorId: number): PhaseFrame | null {
         return this.connectorLastPhaseFrame.get(connectorId) ?? null;
+    }
+
+    public getConnectorType(connectorId: number): ConnectorType {
+        return parseConnectorType(this.configManager.getValue(`connector_type_C${connectorId}`));
+    }
+
+    public setConnectorType(connectorId: number, raw: string): { type: ConnectorType } {
+        const type = parseConnectorType(raw);
+        const key = `connector_type_C${connectorId}`;
+        this.configManager.addCustomKey(key, type, false);
+        this.configManager.changeConfiguration(key, type);
+        console.log(`[TransactionManager] connector_type connector=${connectorId} → ${type}`);
+        this.emit('connectorTypeChanged', { connectorId, type });
+        return { type };
+    }
+
+    public getDCProfile(connectorId: number): DCBatteryProfile {
+        const cached = this.connectorDCProfile.get(connectorId);
+        if (cached) return cached;
+        // Sane defaults: 60 kWh pack, 100 kW charger, 20% start, 80% target.
+        // Configuration keys override per-connector; missing keys fall
+        // through to these. Mirrors a typical 400 V mid-size EV.
+        const cfg = (key: string, fallback: number): number => {
+            const raw = this.configManager.getValue(`dc_${key}_C${connectorId}`);
+            const n = raw ? Number(raw) : NaN;
+            return Number.isFinite(n) ? n : fallback;
+        };
+        const profile: DCBatteryProfile = {
+            capacity_kwh: cfg('capacity_kwh', 60),
+            charger_max_kw: cfg('charger_max_kw', 100),
+            nominal_voltage_v: cfg('nominal_voltage_v', 400),
+            initial_soc_pct: cfg('initial_soc_pct', 20),
+            target_soc_pct: cfg('target_soc_pct', 80),
+            ramp_up_seconds: cfg('ramp_up_seconds', 25),
+        };
+        this.connectorDCProfile.set(connectorId, profile);
+        return profile;
+    }
+
+    public setDCProfile(connectorId: number, partial: Partial<DCBatteryProfile>): DCBatteryProfile {
+        const merged: DCBatteryProfile = { ...this.getDCProfile(connectorId), ...partial };
+        this.connectorDCProfile.set(connectorId, merged);
+        // Persist each numeric field that was provided.
+        for (const [k, v] of Object.entries(partial) as Array<[keyof DCBatteryProfile, number | undefined]>) {
+            if (typeof v === 'number') {
+                const key = `dc_${k}_C${connectorId}`;
+                this.configManager.addCustomKey(key, String(v), false);
+                this.configManager.changeConfiguration(key, String(v));
+            }
+        }
+        console.log(`[TransactionManager] dc_profile connector=${connectorId} → ${JSON.stringify(merged)}`);
+        return merged;
+    }
+
+    public getLastDCFrame(connectorId: number): DCFrame | null {
+        return this.connectorLastDCFrame.get(connectorId) ?? null;
     }
 
     public async startTransaction(connectorId: number, idTag: string, isRemoteStart: boolean = false): Promise<ChargingSession> {
@@ -392,6 +463,15 @@ export class TransactionManager extends EventEmitter {
         const session = this.sessions.get(connectorId);
         if (!session) return;
 
+        const connectorType = this.getConnectorType(connectorId);
+        if (connectorType === 'DC') {
+            this.startDCChargingSimulation(connectorId, session);
+            return;
+        }
+        this.startACChargingSimulation(connectorId, session);
+    }
+
+    private startACChargingSimulation(connectorId: number, session: ChargingSession): void {
         let elapsedSeconds = 0;
         const rampUpDuration = 5; // seconds to reach max power
 
@@ -404,24 +484,20 @@ export class TransactionManager extends EventEmitter {
             elapsedSeconds++;
             session.duration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
 
-            // Random power between 14 and 22 kW
             const randomPower = 14 + Math.random() * (22 - 14);
 
-            // Power ramp-up simulation
             if (elapsedSeconds <= rampUpDuration) {
                 session.powerKw = (randomPower / rampUpDuration) * elapsedSeconds;
             } else {
                 session.powerKw = randomPower;
             }
 
-            // Calculate energy (kWh = kW * hours)
-            const energyIncrementKwh = session.powerKw / 3600; // per second
-            const energyIncrementWh = energyIncrementKwh * 1000; // Convert to Wh
+            const energyIncrementKwh = session.powerKw / 3600;
+            const energyIncrementWh = energyIncrementKwh * 1000;
 
-            // Increment persistent meter value
             const newMeterValue = this.meterStorage.incrementMeterValue(connectorId, energyIncrementWh);
             session.currentMeterValue = newMeterValue;
-            session.energyKwh = (newMeterValue - session.startMeterValue) / 1000; // Session energy
+            session.energyKwh = (newMeterValue - session.startMeterValue) / 1000;
 
             // Refresh the phase frame at 1 Hz so the UI per-phase
             // readout stays live even between MeterValueSampleInterval
@@ -435,6 +511,69 @@ export class TransactionManager extends EventEmitter {
             session.phaseFrame = phaseFrame;
 
             this.emit('sessionUpdated', session);
+        }, 1000);
+
+        this.chargingSimulationIntervals.set(connectorId, interval);
+    }
+
+    private startDCChargingSimulation(connectorId: number, session: ChargingSession): void {
+        // DC sessions track SoC and follow the BMS taper curve. The
+        // session's startTime anchors elapsed_seconds_since_start so
+        // the ramp-up window is honoured even if the meter-value
+        // sample interval is longer.
+        const profile = this.getDCProfile(connectorId);
+        let socPct = profile.initial_soc_pct;
+        let deliveredWh = 0;
+        let lastTickAt = Date.now();
+        session.socPercent = socPct;
+
+        const interval = setInterval(() => {
+            if (!this.sessions.has(connectorId)) {
+                clearInterval(interval);
+                return;
+            }
+
+            const now = Date.now();
+            const elapsedSinceStart = (now - session.startTime.getTime()) / 1000;
+            const elapsedSinceLastTick = (now - lastTickAt) / 1000;
+            lastTickAt = now;
+
+            session.duration = Math.floor(elapsedSinceStart);
+
+            const frame = computeDCFrame({
+                profile,
+                previous_soc_pct: socPct,
+                previous_delivered_wh: deliveredWh,
+                elapsed_seconds_since_start: elapsedSinceStart,
+                elapsed_seconds_since_last_tick: elapsedSinceLastTick,
+            });
+
+            const energyIncrementWh = frame.delivered_wh - deliveredWh;
+            socPct = frame.soc_pct;
+            deliveredWh = frame.delivered_wh;
+
+            const newMeterValue = this.meterStorage.incrementMeterValue(connectorId, energyIncrementWh);
+            session.currentMeterValue = newMeterValue;
+            session.energyKwh = (newMeterValue - session.startMeterValue) / 1000;
+            session.powerKw = frame.power_w / 1000;
+            session.socPercent = frame.soc_pct;
+            session.dcFrame = frame;
+
+            this.connectorLastDCFrame.set(connectorId, frame);
+
+            this.emit('sessionUpdated', session);
+
+            if (frame.completed) {
+                logger.info(COMPONENT, 'dc_session.target_reached', { connector_id: connectorId, soc_pct: frame.soc_pct, delivered_wh: frame.delivered_wh });
+                // Auto-stop the transaction at target SoC. Real DC
+                // chargers do this — the EV asks the EVSE to stop
+                // charging once the negotiated SoC is reached.
+                clearInterval(interval);
+                this.chargingSimulationIntervals.delete(connectorId);
+                this.stopTransaction(connectorId, 'EVDisconnected').catch((err) => {
+                    logger.error(COMPONENT, 'dc_session.auto_stop_failed', { connector_id: connectorId, error: (err as Error).message });
+                });
+            }
         }, 1000);
 
         this.chargingSimulationIntervals.set(connectorId, interval);
@@ -510,84 +649,150 @@ export class TransactionManager extends EventEmitter {
             });
         }
 
-        // Per-phase emission. The PhaseModel turns the session's
-        // total power into a {l1,l2,l3} frame; we emit three rows
-        // per phase-aware measurand.
-        const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
-        const phaseMode = this.getPhaseMode(connectorId);
-        const phaseFrame = computePhaseFrame(session.powerKw, phaseMode, {
-            single_phase_current_cap_a: currentLimitA,
-        });
-        this.connectorLastPhaseFrame.set(connectorId, phaseFrame);
+        const connectorType = this.getConnectorType(connectorId);
 
-        const phasePairs: Array<[Phase, typeof phaseFrame.l1]> = [
-            [Phase.L1, phaseFrame.l1],
-            [Phase.L2, phaseFrame.l2],
-            [Phase.L3, phaseFrame.l3],
-        ];
-
-        if (measurands.includes('Power.Active.Import')) {
-            for (const [phase, reading] of phasePairs) {
+        if (connectorType === 'DC') {
+            // DC: single voltage / current / power rows (no phase tag),
+            // SoC always emitted regardless of MeterValuesSampledData,
+            // Temperature jittered around 30 °C as battery + cable
+            // warm-up is the bigger thermal source than ambient.
+            const dcFrame = this.connectorLastDCFrame.get(connectorId);
+            if (dcFrame) {
+                if (measurands.includes('Power.Active.Import')) {
+                    sampledValue.push({
+                        value: Math.round(dcFrame.power_w).toString(),
+                        context,
+                        measurand: Measurand.PowerActiveImport,
+                        unit: UnitOfMeasure.W,
+                        location: Location.Outlet,
+                    });
+                }
+                if (measurands.includes('Current.Import')) {
+                    sampledValue.push({
+                        value: dcFrame.current_a.toFixed(1),
+                        context,
+                        measurand: Measurand.CurrentImport,
+                        unit: UnitOfMeasure.A,
+                        location: Location.Outlet,
+                    });
+                }
+                if (measurands.includes('Voltage')) {
+                    sampledValue.push({
+                        value: Math.round(dcFrame.voltage_v).toString(),
+                        context,
+                        measurand: Measurand.Voltage,
+                        unit: UnitOfMeasure.V,
+                        location: Location.Outlet,
+                    });
+                }
+                // SoC is the headline DC measurement — always emitted
+                // for DC connectors regardless of `MeterValuesSampledData`.
+                // Configuring it out would mis-model a real DC charger;
+                // CSMS dashboards depend on it for the "X% in Y minutes"
+                // banner.
                 sampledValue.push({
-                    value: Math.round(reading.power_w).toString(),
+                    value: dcFrame.soc_pct.toFixed(0),
                     context,
-                    measurand: Measurand.PowerActiveImport,
-                    unit: UnitOfMeasure.W,
-                    phase,
+                    measurand: Measurand.SoC,
+                    unit: UnitOfMeasure.Percent,
+                    location: Location.EV,
                 });
             }
-        }
-
-        if (measurands.includes('Current.Import')) {
-            for (const [phase, reading] of phasePairs) {
+            if (measurands.includes('Temperature')) {
+                // Battery + cable warm with current draw — 25 °C idle
+                // up to ~45 °C at peak power. Real chargers also emit
+                // Inlet vs Cable readings; here we just report Body.
+                const temp = 25 + Math.random() * 20;
                 sampledValue.push({
-                    value: reading.current_a.toFixed(1),
+                    value: temp.toFixed(1),
                     context,
-                    measurand: Measurand.CurrentImport,
-                    unit: UnitOfMeasure.A,
-                    phase,
+                    measurand: Measurand.Temperature,
+                    unit: UnitOfMeasure.Celsius,
+                    location: Location.Body,
                 });
             }
-        }
+        } else {
+            // AC: per-phase emission. PhaseModel turns the session's
+            // total power into a {l1,l2,l3} frame; we emit three rows
+            // per phase-aware measurand.
+            const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
+            const phaseMode = this.getPhaseMode(connectorId);
+            const phaseFrame = computePhaseFrame(session.powerKw, phaseMode, {
+                single_phase_current_cap_a: currentLimitA,
+            });
+            this.connectorLastPhaseFrame.set(connectorId, phaseFrame);
 
-        if (measurands.includes('Voltage')) {
-            // Voltage is reported phase-to-neutral (L1-N / L2-N / L3-N).
-            // Line-to-line reporting is a possible future toggle; see
-            // SPEC_THREE_PHASE_METERING.md open question 1.
-            const voltagePhases: Array<[Phase, typeof phaseFrame.l1]> = [
-                [Phase.L1N, phaseFrame.l1],
-                [Phase.L2N, phaseFrame.l2],
-                [Phase.L3N, phaseFrame.l3],
+            const phasePairs: Array<[Phase, typeof phaseFrame.l1]> = [
+                [Phase.L1, phaseFrame.l1],
+                [Phase.L2, phaseFrame.l2],
+                [Phase.L3, phaseFrame.l3],
             ];
-            for (const [phase, reading] of voltagePhases) {
+
+            if (measurands.includes('Power.Active.Import')) {
+                for (const [phase, reading] of phasePairs) {
+                    sampledValue.push({
+                        value: Math.round(reading.power_w).toString(),
+                        context,
+                        measurand: Measurand.PowerActiveImport,
+                        unit: UnitOfMeasure.W,
+                        phase,
+                    });
+                }
+            }
+
+            if (measurands.includes('Current.Import')) {
+                for (const [phase, reading] of phasePairs) {
+                    sampledValue.push({
+                        value: reading.current_a.toFixed(1),
+                        context,
+                        measurand: Measurand.CurrentImport,
+                        unit: UnitOfMeasure.A,
+                        phase,
+                    });
+                }
+            }
+
+            if (measurands.includes('Voltage')) {
+                // Voltage reported phase-to-neutral (L1-N / L2-N / L3-N).
+                const voltagePhases: Array<[Phase, typeof phaseFrame.l1]> = [
+                    [Phase.L1N, phaseFrame.l1],
+                    [Phase.L2N, phaseFrame.l2],
+                    [Phase.L3N, phaseFrame.l3],
+                ];
+                for (const [phase, reading] of voltagePhases) {
+                    sampledValue.push({
+                        value: Math.round(reading.voltage_v).toString(),
+                        context,
+                        measurand: Measurand.Voltage,
+                        unit: UnitOfMeasure.V,
+                        phase,
+                    });
+                }
+            }
+
+            if (measurands.includes('Temperature')) {
+                const temp = 25 + Math.random() * 10;
                 sampledValue.push({
-                    value: Math.round(reading.voltage_v).toString(),
+                    value: temp.toFixed(1),
                     context,
-                    measurand: Measurand.Voltage,
-                    unit: UnitOfMeasure.V,
-                    phase,
+                    measurand: Measurand.Temperature,
+                    unit: UnitOfMeasure.Celsius
                 });
             }
-        }
 
-        if (measurands.includes('Temperature')) {
-            const temp = 25 + Math.random() * 10; // 25-35°C
-            sampledValue.push({
-                value: temp.toFixed(1),
-                context,
-                measurand: Measurand.Temperature,
-                unit: UnitOfMeasure.Celsius
-            });
-        }
-
-        if (measurands.includes('SoC')) {
-            const soc = Math.min(100, (session.energyKwh / 50) * 100); // Assume 50kWh battery
-            sampledValue.push({
-                value: soc.toFixed(0),
-                context,
-                measurand: Measurand.SoC,
-                unit: UnitOfMeasure.Percent
-            });
+            if (measurands.includes('SoC')) {
+                // AC chargers don't truly know SoC (no BMS link), but
+                // some EVSE meters approximate it from delivered energy
+                // assuming a fixed 50 kWh pack. Keeping the legacy
+                // behaviour here for backward compatibility.
+                const soc = Math.min(100, (session.energyKwh / 50) * 100);
+                sampledValue.push({
+                    value: soc.toFixed(0),
+                    context,
+                    measurand: Measurand.SoC,
+                    unit: UnitOfMeasure.Percent
+                });
+            }
         }
 
         if (measurands.includes('Frequency')) {
