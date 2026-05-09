@@ -38,6 +38,7 @@ export function DevicesPage() {
     const qc = useQueryClient();
     const onlineMap = useLiveStore((s) => s.online);
     const connectorStatus = useLiveStore((s) => s.connectorStatus);
+    const resetLiveDevice = useLiveStore((s) => s.reset);
 
     const [layout, setLayout] = useState<Layout>(() => {
         if (typeof window === 'undefined') return 'grid';
@@ -74,7 +75,10 @@ export function DevicesPage() {
     });
     const remove = useMutation({
         mutationFn: api.deleteDevice,
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['devices'] }),
+        onSuccess: (_data, deviceId) => {
+            qc.invalidateQueries({ queryKey: ['devices'] });
+            resetLiveDevice(deviceId);
+        },
     });
 
     const [showNew, setShowNew] = useState(false);

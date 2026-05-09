@@ -60,6 +60,10 @@ interface LiveState {
     appendFrame: (e: Omit<TraceEntry, 'seq'>) => void;
     clearTraces: (deviceId: string) => void;
     reset: (deviceId: string) => void;
+    /** Drop every map entry whose deviceId isn't in `keep`. Called from
+     *  the WS hello snapshot and after device deletions so the maps
+     *  stay bounded under bulk-create/delete cycles. */
+    evictMissing: (keep: Set<string>) => void;
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
@@ -126,13 +130,47 @@ export const useLiveStore = create<LiveState>((set) => ({
 
     reset: (deviceId) =>
         set((s) => {
+            const on = new Map(s.online);
             const cs = new Map(s.connectorStatus);
             const tk = new Map(s.tick);
             const tr = new Map(s.traces);
+            on.delete(deviceId);
             for (const k of [...cs.keys()]) if (k.startsWith(`${deviceId}:`)) cs.delete(k);
             for (const k of [...tk.keys()]) if (k.startsWith(`${deviceId}:`)) tk.delete(k);
             tr.delete(deviceId);
-            return { connectorStatus: cs, tick: tk, traces: tr };
+            return { online: on, connectorStatus: cs, tick: tk, traces: tr };
+        }),
+
+    evictMissing: (keep) =>
+        set((s) => {
+            // Bail when nothing changed — avoids forcing every component
+            // that subscribes to one of these Maps to re-render on a
+            // routine REST refetch where the device set didn't move.
+            const onlineMissing = [...s.online.keys()].filter((id) => !keep.has(id));
+            const tracesMissing = [...s.traces.keys()].filter((id) => !keep.has(id));
+            const connStatusMissing = [...s.connectorStatus.keys()].filter(
+                (k) => !keep.has(k.split(':')[0] ?? ''),
+            );
+            const tickMissing = [...s.tick.keys()].filter(
+                (k) => !keep.has(k.split(':')[0] ?? ''),
+            );
+            if (
+                onlineMissing.length === 0 &&
+                tracesMissing.length === 0 &&
+                connStatusMissing.length === 0 &&
+                tickMissing.length === 0
+            ) {
+                return {};
+            }
+            const on = new Map(s.online);
+            const cs = new Map(s.connectorStatus);
+            const tk = new Map(s.tick);
+            const tr = new Map(s.traces);
+            for (const id of onlineMissing) on.delete(id);
+            for (const id of tracesMissing) tr.delete(id);
+            for (const k of connStatusMissing) cs.delete(k);
+            for (const k of tickMissing) tk.delete(k);
+            return { online: on, connectorStatus: cs, tick: tk, traces: tr };
         }),
 }));
 

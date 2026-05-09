@@ -125,13 +125,17 @@ export class Simulator extends EventEmitter {
         });
         this.client = new OcppClient(device, clientOptions);
         this.client.setIncomingHandler((action, payload) => this.handleCsmsCall(action, payload));
-        this.client.on('online', () => this.handleOnline());
+        // 'online' fires the moment the WS opens — but per OCPP §4.2 we
+        // must NOT send anything other than BootNotification until the
+        // CSMS Accepts. The Status fan-out and live-state flip both wait
+        // for 'booted' below.
         this.client.on('offline', () => this.emit('state', { online: false }));
         this.client.on('booted', () => {
             // Apply any persisted heartbeat-interval override now that we're connected.
             const hb = this.config.getNumber('HeartbeatInterval');
             if (hb && hb > 0) this.client.setHeartbeatIntervalSec(hb);
             this.emit('state', { online: true });
+            void this.handleOnline();
         });
         this.client.on('frame', (f) => this.emit('frame', f));
         this.client.on('error', (e) => this.emit('error', e));

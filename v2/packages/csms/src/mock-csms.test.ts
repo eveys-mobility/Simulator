@@ -244,6 +244,52 @@ describe('MockCsms', () => {
         expect(handle.upgradeHeaders.authorization).toBeUndefined();
     });
 
+    it('honors BootNotification Rejected — retries on the CSMS interval and stays quiet', async () => {
+        let bootCount = 0;
+        const csmsRejecting = new MockCsms({
+            handlers: {
+                BootNotification: () => {
+                    bootCount += 1;
+                    if (bootCount === 1) {
+                        return { status: 'Rejected', currentTime: new Date().toISOString(), interval: 1 };
+                    }
+                    return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
+                },
+            },
+        });
+        await csmsRejecting.start();
+        const localStore = new Store(':memory:');
+        const device = buildAcDevice('cp_test_rejected', csmsRejecting.url);
+        localStore.insertDevice(device);
+        const localSim = silenceErrors(new Simulator(device, localStore));
+        await localSim.start();
+
+        try {
+            const handle = await csmsRejecting.waitForDevice(device.id);
+
+            // While bootCount === 1, the simulator must not have sent
+            // any StatusNotification — only BootNotification is allowed
+            // by §4.2 in the Rejected state.
+            await sleep(300);
+            const earlyStatus = handle.framesFor('StatusNotification').filter((f) => f.direction === 'in');
+            expect(earlyStatus.length).toBe(0);
+
+            // The retry should fire within ~1s and the second boot
+            // returns Accepted; Status frames follow.
+            const deadline = Date.now() + 4000;
+            while (bootCount < 2 && Date.now() < deadline) {
+                await sleep(50);
+            }
+            expect(bootCount).toBeGreaterThanOrEqual(2);
+            await handle.waitForStatus('Available', 1, 3000);
+        } finally {
+            localSim.stop();
+            await sleep(50);
+            localStore.close();
+            await csmsRejecting.stop();
+        }
+    });
+
     it('honors BootNotification Pending — defers heartbeat + status frames', async () => {
         // Override the BootNotification handler to return Pending the
         // first time, Accepted the second. The simulator must not send
