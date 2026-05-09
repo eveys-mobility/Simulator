@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import {
@@ -8,10 +9,13 @@ import {
     type Device,
     DeviceTypeSchema,
     PhaseModeSchema,
+    SCENARIO_PRESETS,
+    ScenarioSchema,
 } from '@ocpp-sim/core';
 import Fastify from 'fastify';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
+import { BenchmarkEngine } from './benchmark-engine.js';
 import type { DeviceManager } from './device-manager.js';
 import { registry as metricsRegistry } from './metrics.js';
 import type { Store } from './store.js';
@@ -29,6 +33,16 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
 
     // Mutable so the Settings PUT can update what new devices default to.
     let currentDefaultOcppUrl = defaultOcppUrl;
+
+    /** In-flight benchmark runs, keyed by row id. The engine instance
+     *  stays in memory while running so /stop can reach it. Removed
+     *  on done/stop. */
+    const activeRuns = new Map<number, BenchmarkEngine>();
+
+    /** Single fan-out point for benchmark progress events — the WS hub
+     *  subscribes here so it can broadcast without the engine knowing
+     *  about WebSockets. */
+    const benchmarkBus = new EventEmitter();
 
     // ---- DEVICES ----
 
@@ -593,15 +607,21 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
             // (typically a few frames/sec/device); the live trace UI rate-
             // limits client-side via a ring buffer.
             const onFrame = (e: unknown) => send({ type: 'frame', payload: { ...(e as object), at: Date.now() } });
+            const onBenchmarkProgress = (e: unknown) => send({ type: 'benchmark', payload: e });
+            const onBenchmarkDone = (e: unknown) => send({ type: 'benchmark-done', payload: e });
             manager.on('state', onState);
             manager.on('tick', onTick);
             manager.on('session', onSession);
             manager.on('frame', onFrame);
+            benchmarkBus.on('progress', onBenchmarkProgress);
+            benchmarkBus.on('done', onBenchmarkDone);
             socket.on('close', () => {
                 manager.off('state', onState);
                 manager.off('tick', onTick);
                 manager.off('session', onSession);
                 manager.off('frame', onFrame);
+                benchmarkBus.off('progress', onBenchmarkProgress);
+                benchmarkBus.off('done', onBenchmarkDone);
             });
         });
     });
@@ -635,6 +655,70 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         currentDefaultOcppUrl = body.data.defaultOcppUrl;
         store.setSetting('default_ocpp_url', currentDefaultOcppUrl);
         return { defaultOcppUrl: currentDefaultOcppUrl };
+    });
+
+    // ---- BENCHMARK RUNS ----
+    //
+    // POST /runs       start a scenario; returns the row id + initial state
+    // POST /runs/:id/stop   stop a run early
+    // GET  /runs       paginated history
+    // GET  /runs/:id   single run with summary
+    // GET  /presets    curated scenario presets
+
+    app.get('/api/benchmark/presets', async () => {
+        return SCENARIO_PRESETS;
+    });
+
+    app.get('/api/benchmark/runs', async (req) => {
+        const q = req.query as { limit?: string; offset?: string };
+        return store.listBenchmarkRuns({
+            limit: q.limit ? Number(q.limit) : undefined,
+            offset: q.offset ? Number(q.offset) : undefined,
+        });
+    });
+
+    app.get<{ Params: { id: string } }>('/api/benchmark/runs/:id', async (req, reply) => {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid id' });
+        const run = store.getBenchmarkRun(id);
+        if (!run) return reply.code(404).send({ error: 'not found' });
+        return run;
+    });
+
+    app.post('/api/benchmark/runs', async (req, reply) => {
+        const body = ScenarioSchema.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const startedAt = new Date().toISOString();
+        const runId = store.insertBenchmarkRun(body.data, startedAt);
+        const engine = new BenchmarkEngine(runId, body.data, manager, store, currentDefaultOcppUrl);
+        engine.on('progress', (p) => benchmarkBus.emit('progress', p));
+        engine.on('done', (d) => {
+            benchmarkBus.emit('done', d);
+            activeRuns.delete(runId);
+        });
+        engine.on('error', (err) => {
+            // Engine surface — engine itself counts these in its summary.
+            // Keep noise down.
+            void err;
+        });
+        activeRuns.set(runId, engine);
+        try {
+            await engine.start();
+        } catch (err) {
+            activeRuns.delete(runId);
+            return reply.code(500).send({ error: (err as Error).message });
+        }
+        const run = store.getBenchmarkRun(runId);
+        return run;
+    });
+
+    app.post<{ Params: { id: string } }>('/api/benchmark/runs/:id/stop', async (req, reply) => {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid id' });
+        const engine = activeRuns.get(id);
+        if (!engine) return reply.code(404).send({ error: 'run not active' });
+        await engine.stop();
+        return { ok: true };
     });
 
     /**

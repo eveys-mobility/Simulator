@@ -1,4 +1,4 @@
-import type { ConnectorStatus, MeterTick } from '@ocpp-sim/core';
+import type { BenchmarkProgress, ConnectorStatus, MeterTick } from '@ocpp-sim/core';
 import { create } from 'zustand';
 
 /**
@@ -51,6 +51,9 @@ interface LiveState {
      *  fires at OCPP rate (≪10/s), not React render rate. */
     traces: Map<string, TraceEntry[]>;
     nextTraceSeq: number;
+    /** Latest progress sample per benchmark runId, keyed numerically. */
+    benchmarkProgress: Map<number, BenchmarkProgress>;
+    setBenchmarkProgress: (p: BenchmarkProgress) => void;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
     applyTick: (t: MeterTick) => void;
@@ -65,6 +68,14 @@ export const useLiveStore = create<LiveState>((set) => ({
     tick: new Map(),
     traces: new Map(),
     nextTraceSeq: 0,
+    benchmarkProgress: new Map(),
+
+    setBenchmarkProgress: (p) =>
+        set((s) => {
+            const next = new Map(s.benchmarkProgress);
+            next.set(p.runId, p);
+            return { benchmarkProgress: next };
+        }),
 
     setOnline: (deviceId, online) =>
         set((s) => {

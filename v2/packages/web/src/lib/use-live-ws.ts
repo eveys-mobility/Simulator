@@ -16,6 +16,7 @@ export function useLiveWs() {
     const setConnectorStatus = useLiveStore((s) => s.setConnectorStatus);
     const applyTick = useLiveStore((s) => s.applyTick);
     const appendFrame = useLiveStore((s) => s.appendFrame);
+    const setBenchmarkProgress = useLiveStore((s) => s.setBenchmarkProgress);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -67,6 +68,15 @@ export function useLiveWs() {
                         qc.invalidateQueries({ queryKey: ['devices'] });
                         break;
                     }
+                    case 'benchmark': {
+                        const p = msg.payload as never;
+                        setBenchmarkProgress(p);
+                        break;
+                    }
+                    case 'benchmark-done': {
+                        qc.invalidateQueries({ queryKey: ['benchmark-runs'] });
+                        break;
+                    }
                     case 'frame': {
                         const p = msg.payload as Partial<TraceEntry>;
                         if (
@@ -108,5 +118,5 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, appendFrame, qc]);
+    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, qc]);
 }
