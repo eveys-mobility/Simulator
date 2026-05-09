@@ -3,6 +3,8 @@ import type {
     AcWiring,
     BenchmarkRun,
     BenchmarkRunSummary,
+    ChargingProfile,
+    ChargingProfilePurpose,
     DCBatteryProfile,
     Device,
     DeviceType,
@@ -239,6 +241,85 @@ export class Store {
             .run(deviceId, key, value);
     }
 
+    // ---- charging profiles (Smart Charging) ----
+
+    /**
+     * Insert or replace a profile by (device, connector, purpose,
+     * stackLevel). Per OCPP §3.13 a same-key write replaces the
+     * existing one — the CSMS uses this to evolve a stack.
+     */
+    setChargingProfile(deviceId: string, connectorId: number, profile: ChargingProfile): void {
+        this.db
+            .prepare(
+                `INSERT INTO charging_profiles
+                   (device_id, connector_id, profile_id, stack_level, purpose, profile_json)
+                 VALUES (@deviceId, @connectorId, @profileId, @stackLevel, @purpose, @json)
+                 ON CONFLICT(device_id, connector_id, purpose, stack_level)
+                 DO UPDATE SET profile_id = excluded.profile_id, profile_json = excluded.profile_json`,
+            )
+            .run({
+                deviceId,
+                connectorId,
+                profileId: profile.chargingProfileId,
+                stackLevel: profile.stackLevel,
+                purpose: profile.chargingProfilePurpose,
+                json: JSON.stringify(profile),
+            });
+    }
+
+    /**
+     * Filtered delete used by ClearChargingProfile. All filter fields
+     * are optional; an empty filter clears every profile on the device.
+     * Returns the number of rows removed.
+     */
+    clearChargingProfiles(deviceId: string, filter: {
+        id?: number;
+        connectorId?: number;
+        purpose?: ChargingProfilePurpose;
+        stackLevel?: number;
+    }): number {
+        const where = ['device_id = @deviceId'];
+        const params: Record<string, unknown> = { deviceId };
+        if (filter.id !== undefined) {
+            where.push('profile_id = @id');
+            params.id = filter.id;
+        }
+        if (filter.connectorId !== undefined) {
+            where.push('connector_id = @connectorId');
+            params.connectorId = filter.connectorId;
+        }
+        if (filter.purpose !== undefined) {
+            where.push('purpose = @purpose');
+            params.purpose = filter.purpose;
+        }
+        if (filter.stackLevel !== undefined) {
+            where.push('stack_level = @stackLevel');
+            params.stackLevel = filter.stackLevel;
+        }
+        const r = this.db
+            .prepare(`DELETE FROM charging_profiles WHERE ${where.join(' AND ')}`)
+            .run(params);
+        return r.changes;
+    }
+
+    listChargingProfiles(deviceId: string, connectorId?: number): {
+        connectorId: number;
+        profile: ChargingProfile;
+    }[] {
+        const sql = connectorId !== undefined
+            ? `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ? AND connector_id = ?`
+            : `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ?`;
+        const rows = (
+            connectorId !== undefined
+                ? this.db.prepare(sql).all(deviceId, connectorId)
+                : this.db.prepare(sql).all(deviceId)
+        ) as Array<{ connector_id: number; profile_json: string }>;
+        return rows.map((r) => ({
+            connectorId: r.connector_id,
+            profile: JSON.parse(r.profile_json) as ChargingProfile,
+        }));
+    }
+
     // ---- app-wide settings ----
 
     getSetting(key: string): string | null {
@@ -331,10 +412,11 @@ export class Store {
             this.db.exec(`
                 DELETE FROM sessions;
                 DELETE FROM device_config;
+                DELETE FROM charging_profiles;
                 DELETE FROM devices;
                 DELETE FROM app_settings;
                 DELETE FROM benchmark_runs;
-                DELETE FROM sqlite_sequence WHERE name IN ('sessions','benchmark_runs');
+                DELETE FROM sqlite_sequence WHERE name IN ('sessions','benchmark_runs','charging_profiles');
             `);
         });
         tx();
@@ -528,6 +610,25 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 summary      TEXT
             );
             CREATE INDEX benchmark_runs_status ON benchmark_runs(status);
+        `);
+    },
+    // v6 — charging profiles (Phase 8). One row per (device, connector,
+    // purpose, stack_level). The CSMS-supplied profile id is in the
+    // JSON payload; we use it for ClearChargingProfile filtering but
+    // it isn't a primary key (CSMS may reuse ids across devices).
+    (db) => {
+        db.exec(`
+            CREATE TABLE charging_profiles (
+                row_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                connector_id INTEGER NOT NULL,
+                profile_id   INTEGER NOT NULL,
+                stack_level  INTEGER NOT NULL,
+                purpose      TEXT NOT NULL CHECK(purpose IN ('ChargePointMaxProfile','TxDefaultProfile','TxProfile')),
+                profile_json TEXT NOT NULL,
+                UNIQUE(device_id, connector_id, purpose, stack_level)
+            );
+            CREATE INDEX charging_profiles_device ON charging_profiles(device_id);
         `);
     },
 ];

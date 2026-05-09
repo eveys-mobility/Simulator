@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ChargingProfiles } from '@/components/ChargingProfiles';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { LiveDot } from '@/components/LiveDot';
 import { ManualControls } from '@/components/ManualControls';
@@ -139,6 +140,8 @@ export function DeviceDetailPage() {
             </div>
 
             <ManualControls device={device} />
+
+            <ChargingProfiles deviceId={device.id} />
 
             <TraceViewer deviceId={device.id} />
         </div>

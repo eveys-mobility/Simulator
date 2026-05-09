@@ -98,6 +98,12 @@ export const api = {
 
     fleetEmergencyStop: () => http<{ stopped: number }>('POST', '/fleet/emergency-stop'),
 
+    listChargingProfiles: (deviceId: string) =>
+        http<Array<{ connectorId: number; profile: import('@ocpp-sim/core').ChargingProfile }>>(
+            'GET',
+            `/devices/${deviceId}/charging-profiles`,
+        ),
+
     listBenchmarkPresets: () =>
         http<Array<{ key: string; label: string; scenario: import('@ocpp-sim/core').Scenario }>>(
             'GET',
