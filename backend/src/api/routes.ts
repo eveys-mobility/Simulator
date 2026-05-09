@@ -20,6 +20,7 @@ export function createApiRoutes(
                 id,
                 status: chargePoint.getConnectorStatus(id),
                 hasActiveSession: transactionManager.hasActiveSession(id),
+                phaseMode: transactionManager.getPhaseMode(id),
             });
         }
 
@@ -34,10 +35,35 @@ export function createApiRoutes(
                 powerKw: session.powerKw,
                 energyKwh: session.energyKwh,
                 duration: session.duration,
-                startTime: session.startTime
+                startTime: session.startTime,
+                phaseFrame: transactionManager.getLastPhaseFrame(session.connectorId),
             })),
             connectors,
         });
+    });
+
+    // Get / set per-connector phase mode. The mode controls how the
+    // simulator splits total session power into per-phase Voltage /
+    // Current / Power MeterValues entries (see PhaseModel.ts).
+    router.get('/connectors/:id/phase-mode', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        return res.json({ success: true, connectorId: id, mode: transactionManager.getPhaseMode(id) });
+    });
+
+    router.post('/connectors/:id/phase-mode', (req: Request, res: Response) => {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'invalid connector id' });
+        }
+        const raw = req.body?.mode;
+        if (typeof raw !== 'string') {
+            return res.status(400).json({ success: false, message: 'body.mode (string) is required' });
+        }
+        const result = transactionManager.setPhaseMode(id, raw);
+        return res.json({ success: true, connectorId: id, mode: result.mode, warned: result.warned });
     });
 
     // Get transaction history

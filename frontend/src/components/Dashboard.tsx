@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity, Zap, Clock, Battery } from 'lucide-react';
 import { ChargingSession, ConnectorState } from '../services/api';
+import { PhaseReadout } from './PhaseReadout';
 
 interface DashboardProps {
     connector: ConnectorState;
@@ -82,6 +83,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ connector, session }) => {
                         </div>
                     </div>
                 </div>
+
+                {session && <PhaseReadout frame={session.phaseFrame} />}
 
                 {session && (
                     <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>

@@ -9,6 +9,10 @@ export interface ChargingSession {
     powerKw: number;
     energyKwh: number;
     duration: number; // seconds
+    /** Latest per-phase frame from PhaseModel. Stamped onto the
+     *  session whenever sendMeterValues runs so the websocket
+     *  `sessionUpdated` push carries the breakdown for the UI. */
+    phaseFrame?: import('../ocpp/PhaseModel').PhaseFrame;
 }
 
 export enum SessionStatus {
