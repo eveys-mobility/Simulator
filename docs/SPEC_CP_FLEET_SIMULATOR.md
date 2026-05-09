@@ -413,11 +413,13 @@ Five MRs after this spec lands. Each is independently reviewable.
 
 Each MR targets the previous (`main` ← MR-D ← MR-E ← MR-F ← MR-G ← MR-H), so reviewing top-down doesn't require holding the full picture.
 
-## Open questions
+## Resolved questions
 
-1. **Default CP id format.** `AC-A-001` (zero-padded with group prefix) is readable but couples CP id to group id; renaming a group breaks the ids. Alternative: opaque `cp_<6 hex>`. Lean: opaque, surface the friendly name as a separate `display_name` column.
-2. **Should the fleet UI deep-link to the existing single-CP UI?** The single-CP UI today expects `CHARGE_POINT_ID` env at boot. To "view" a fleet CP in detail, we'd need either (a) one more port per CP — wasteful at 100, or (b) re-aim the existing UI to take `cp_id` from a query string and proxy through the worker's pubsub. (b) is more work but the right answer.
-3. **Dev-mode reset.** Should the fleet manager have a `POST /fleet/_dev/reset` that drops SQLite + terminates all workers + restarts the supervisor? Useful for scripted load tests; mildly dangerous in shared environments. Lean: yes, gated behind `EVEYS_FLEET_DEV_RESET=1`.
+1. **CP id format.** Opaque `cp_<6 hex>` (e.g. `cp_a1b2c3`); friendly name lives in `display_name` on the `charge_points` row. Decouples identity from group/org structure — renaming a group never invalidates a CP id, ids stay stable across imports/exports, and the gateway already accepts arbitrary cp_ids. Friendly name is what the UI renders; the opaque id is what the gateway and logs see.
+
+2. **Single-CP UI deep-linking.** Yes — as a small change inside MR-G, not a refactor. The existing `App.tsx` accepts `?cp=<cp_id>` from the URL: when present, it drops the local backend connection and subscribes to the fleet manager's pubsub channel for that CP id; when absent, it stays as today (connects to its own `:3001` backend). Backwards-compatible, ~50 LOC in `App.tsx` + `services/api.ts`. No per-CP backend process needed for UI viewing — the fleet manager already holds that state via worker pubsub.
+
+3. **Dev reset.** Yes — `POST /fleet/_dev/reset` exists, gated by `EVEYS_FLEET_DEV_RESET=1`. Behavior: drops the SQLite tables, terminates all workers, re-bootstraps from `fixtures.ts`. Returns 403 if the env var isn't set to `1`. Logs loudly at WARN on invocation. Without this, every integration/load test ends up either hand-rolling teardown or `rm -f`'ing the SQLite file — both worse than a gated endpoint.
 
 ## Decisions deferred to implementation
 
