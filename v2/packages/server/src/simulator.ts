@@ -120,6 +120,17 @@ export class Simulator extends EventEmitter {
     }
 
     /**
+     * Set a single OCPP configuration key. Returns the wire-status the
+     * CSMS would receive (Accepted / Rejected / NotSupported / RebootRequired).
+     * Used by fleet bulk-config endpoints; the listener inside the
+     * Simulator picks up effects (heartbeat cadence, etc.) the same way
+     * a real ChangeConfiguration would.
+     */
+    setOcppConfig(key: string, value: string): 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired' {
+        return this.config.set(key, value);
+    }
+
+    /**
      * Apply a device-edit patch to the running Simulator without
      * respawning the OCPP socket. Used for fields whose change can be
      * picked up on the next tick (phaseMode, acWiring, dcProfile,

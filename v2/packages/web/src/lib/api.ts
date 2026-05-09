@@ -67,6 +67,37 @@ export const api = {
     reboot: (deviceId: string, type: 'Soft' | 'Hard') =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/reboot`, { type }),
 
+    bulkCreateDevices: (body: {
+        count: number;
+        type: DeviceType;
+        namePrefix?: string;
+        ocppUrl?: string;
+        staggerMs?: number;
+    }) => http<{ created: number; devices: DeviceWithRuntime[] }>('POST', '/devices/bulk', body),
+
+    fleetSummary: () =>
+        http<{
+            total: number;
+            online: number;
+            offline: number;
+            chargingConnectors: number;
+            activeConnectors: number;
+        }>('GET', '/fleet/summary'),
+
+    fleetStartFraction: (body: { fraction: number; idTag?: string }) =>
+        http<{ eligible: number; picked: number; started: number; errors: string[] }>(
+            'POST',
+            '/fleet/start',
+            body,
+        ),
+
+    fleetReconnect: () => http<{ reconnecting: number }>('POST', '/fleet/reconnect'),
+
+    fleetHeartbeatInterval: (seconds: number) =>
+        http<{ updated: number; seconds: number }>('POST', '/fleet/heartbeat-interval', { seconds }),
+
+    fleetEmergencyStop: () => http<{ stopped: number }>('POST', '/fleet/emergency-stop'),
+
     getSettings: () => http<{ defaultOcppUrl: string }>('GET', '/settings'),
     updateSettings: (body: { defaultOcppUrl: string }) =>
         http<{ defaultOcppUrl: string }>('PUT', '/settings', body),

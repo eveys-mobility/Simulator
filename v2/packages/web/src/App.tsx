@@ -1,4 +1,4 @@
-import { Activity, Cpu, Settings, Zap } from 'lucide-react';
+import { Activity, Cpu, Layers, Settings, Zap } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { cn } from '@/lib/cn';
@@ -6,6 +6,7 @@ import { useApplyTheme } from '@/lib/theme';
 import { useLiveWs } from '@/lib/use-live-ws';
 import { DeviceDetailPage } from '@/pages/DeviceDetailPage';
 import { DevicesPage } from '@/pages/DevicesPage';
+import { FleetPage } from '@/pages/FleetPage';
 import { SessionsPage } from '@/pages/SessionsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 
@@ -31,6 +32,9 @@ export default function App() {
                             <NavItem to="/devices">
                                 <Cpu className="h-4 w-4" /> Devices
                             </NavItem>
+                            <NavItem to="/fleet">
+                                <Layers className="h-4 w-4" /> Fleet
+                            </NavItem>
                             <NavItem to="/sessions">
                                 <Activity className="h-4 w-4" /> Sessions
                             </NavItem>
@@ -47,6 +51,7 @@ export default function App() {
                     <Route path="/" element={<Navigate to="/devices" replace />} />
                     <Route path="/devices" element={<DevicesPage />} />
                     <Route path="/devices/:id" element={<DeviceDetailPage />} />
+                    <Route path="/fleet" element={<FleetPage />} />
                     <Route path="/sessions" element={<SessionsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                 </Routes>
