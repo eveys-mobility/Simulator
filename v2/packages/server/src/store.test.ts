@@ -52,6 +52,48 @@ describe('Store — devices', () => {
         expect(d?.type).toBe('AC');
         s.close();
     });
+
+    it('updates each editable field', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.updateDevice(sample.id, {
+            displayName: 'New name',
+            vendor: 'NewVendor',
+            firmwareVersion: '2.0.0',
+            maxPowerKw: 11,
+            ocppUrl: 'ws://other.example:9000',
+            phaseMode: 'single-phase',
+            dcProfile: {
+                capacityKwh: 75,
+                chargerMaxKw: 150,
+                nominalVoltageV: 800,
+                initialSocPct: 10,
+                targetSocPct: 90,
+                rampUpSeconds: 5,
+            },
+        });
+        const d = s.getDevice(sample.id);
+        expect(d?.displayName).toBe('New name');
+        expect(d?.vendor).toBe('NewVendor');
+        expect(d?.firmwareVersion).toBe('2.0.0');
+        expect(d?.maxPowerKw).toBe(11);
+        expect(d?.ocppUrl).toBe('ws://other.example:9000');
+        expect(d?.phaseMode).toBe('single-phase');
+        expect(d?.dcProfile?.capacityKwh).toBe(75);
+        expect(d?.type).toBe('AC'); // type still locked
+        s.close();
+    });
+
+    it('updates a single field without touching the rest', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.updateDevice(sample.id, { ocppUrl: 'ws://elsewhere:1234' });
+        const d = s.getDevice(sample.id);
+        expect(d?.ocppUrl).toBe('ws://elsewhere:1234');
+        expect(d?.vendor).toBe(sample.vendor);
+        expect(d?.maxPowerKw).toBe(sample.maxPowerKw);
+        s.close();
+    });
 });
 
 describe('Store — sessions', () => {

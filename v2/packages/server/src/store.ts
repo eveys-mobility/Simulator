@@ -55,12 +55,36 @@ export class Store {
             });
     }
 
-    updateDevice(id: string, patch: Partial<Pick<Device, 'displayName' | 'phaseMode' | 'dcProfile'>>): void {
+    updateDevice(
+        id: string,
+        patch: Partial<
+            Pick<
+                Device,
+                'displayName' | 'vendor' | 'firmwareVersion' | 'maxPowerKw' | 'ocppUrl' | 'phaseMode' | 'dcProfile'
+            >
+        >,
+    ): void {
         const sets: string[] = [];
         const params: Record<string, unknown> = { id };
         if (patch.displayName !== undefined) {
             sets.push('display_name = @displayName');
             params.displayName = patch.displayName;
+        }
+        if (patch.vendor !== undefined) {
+            sets.push('vendor = @vendor');
+            params.vendor = patch.vendor;
+        }
+        if (patch.firmwareVersion !== undefined) {
+            sets.push('firmware_version = @firmwareVersion');
+            params.firmwareVersion = patch.firmwareVersion;
+        }
+        if (patch.maxPowerKw !== undefined) {
+            sets.push('max_power_kw = @maxPowerKw');
+            params.maxPowerKw = patch.maxPowerKw;
+        }
+        if (patch.ocppUrl !== undefined) {
+            sets.push('ocpp_url = @ocppUrl');
+            params.ocppUrl = patch.ocppUrl;
         }
         if (patch.phaseMode !== undefined) {
             sets.push('phase_mode = @phaseMode');

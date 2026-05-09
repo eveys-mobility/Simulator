@@ -74,24 +74,77 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
 
     const PatchDeviceBody = z.object({
         displayName: z.string().min(1).max(80).optional(),
+        vendor: z.string().min(1).max(80).optional(),
+        firmwareVersion: z.string().min(1).max(40).optional(),
+        maxPowerKw: z.number().positive().max(1000).optional(),
+        ocppUrl: z.string().url().optional(),
         phaseMode: PhaseModeSchema.optional(),
         dcProfile: DCBatteryProfileSchema.partial().optional(),
     });
+
+    /** Editing any of these requires reconnecting the OCPP socket so
+     *  the gateway sees the new BootNotification. We refuse the edit
+     *  if a session is active rather than yanking it mid-charge. */
+    const RESPAWN_FIELDS = ['vendor', 'firmwareVersion', 'maxPowerKw', 'ocppUrl'] as const;
 
     app.patch<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
         const body = PatchDeviceBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: body.error.message });
         const existing = store.getDevice(req.params.id);
         if (!existing) return reply.code(404).send({ error: 'not found' });
-        const merged: Pick<Device, 'displayName' | 'phaseMode' | 'dcProfile'> = {
+
+        const changedRespawnFields = RESPAWN_FIELDS.filter(
+            (f) => body.data[f] !== undefined && body.data[f] !== existing[f],
+        );
+        if (changedRespawnFields.length > 0 && manager.hasActiveSession(req.params.id)) {
+            return reply.code(409).send({
+                error: `cannot edit ${changedRespawnFields.join(', ')} while a session is active — stop the session first`,
+            });
+        }
+
+        const mergedDcProfile = body.data.dcProfile
+            ? DCBatteryProfileSchema.parse({ ...(existing.dcProfile ?? {}), ...body.data.dcProfile })
+            : existing.dcProfile;
+
+        // Model string is derived from type + maxPowerKw so BootNotification
+        // matches the active config (the gateway sees `Eveys-22kW-AC` etc.).
+        const maxPowerKw = body.data.maxPowerKw ?? existing.maxPowerKw;
+        const model =
+            body.data.maxPowerKw !== undefined
+                ? `Eveys-${Math.round(maxPowerKw)}kW-${existing.type}`
+                : existing.model;
+
+        const merged: Device = {
+            ...existing,
             displayName: body.data.displayName ?? existing.displayName,
+            vendor: body.data.vendor ?? existing.vendor,
+            firmwareVersion: body.data.firmwareVersion ?? existing.firmwareVersion,
+            maxPowerKw,
+            model,
+            ocppUrl: body.data.ocppUrl ?? existing.ocppUrl,
             phaseMode: body.data.phaseMode ?? existing.phaseMode,
-            dcProfile: body.data.dcProfile
-                ? DCBatteryProfileSchema.parse({ ...(existing.dcProfile ?? {}), ...body.data.dcProfile })
-                : existing.dcProfile,
+            dcProfile: mergedDcProfile,
         };
-        store.updateDevice(req.params.id, merged);
-        return withRuntime({ ...existing, ...merged }, manager);
+
+        store.updateDevice(req.params.id, {
+            displayName: merged.displayName,
+            vendor: merged.vendor,
+            firmwareVersion: merged.firmwareVersion,
+            maxPowerKw: merged.maxPowerKw,
+            ocppUrl: merged.ocppUrl,
+            phaseMode: merged.phaseMode,
+            dcProfile: merged.dcProfile,
+        });
+        // Model lives in the same row but isn't in the patch type (clients
+        // can't set it directly). Update it via raw SQL when it changed.
+        if (model !== existing.model) {
+            store.db.prepare(`UPDATE devices SET model = ? WHERE id = ?`).run(model, req.params.id);
+        }
+
+        if (changedRespawnFields.length > 0) {
+            await manager.respawn(merged);
+        }
+        return withRuntime(merged, manager);
     });
 
     app.delete<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {

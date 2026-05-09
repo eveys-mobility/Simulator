@@ -60,7 +60,12 @@ export class OcppClient extends EventEmitter {
         }
         this.pending.clear();
         if (this.ws) {
+            // Drop our listeners, but install a no-op `error` handler so
+            // the async close-during-connect rejection (common when stop
+            // races a still-connecting socket) doesn't bubble up as an
+            // unhandled error event.
             this.ws.removeAllListeners();
+            this.ws.on('error', () => undefined);
             this.ws.close();
             this.ws = null;
         }
