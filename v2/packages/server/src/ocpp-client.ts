@@ -13,12 +13,22 @@ import {
     encodeError,
     encodeResult,
 } from '@ocpp-sim/core';
+import {
+    ocppBootLatencySeconds,
+    ocppCallErrorsTotal,
+    ocppCallLatencySeconds,
+    ocppCallTotal,
+    ocppFramesTotal,
+    ocppWsReconnectsTotal,
+} from './metrics.js';
 
 interface PendingCall {
     resolve: (payload: unknown) => void;
     reject: (err: Error) => void;
     action: string;
     timeout: NodeJS.Timeout;
+    /** Wall-clock start of the CALL, in seconds (process.hrtime-based). */
+    startedAtSec: number;
 }
 
 const CALL_TIMEOUT_MS = 30_000;
@@ -116,14 +126,20 @@ export class OcppClient extends EventEmitter {
         if (!this.connected || !this.ws) throw new Error(`device ${this.device.id} not connected`);
         const id = uuid();
         const wire = encodeCall(id, action, payload);
+        const startedAtSec = Date.now() / 1000;
+        const deviceType = this.device.type;
+        ocppCallTotal.inc({ action, direction: 'out', device_type: deviceType });
+        ocppFramesTotal.inc({ direction: 'out', frame_type: 'CALL' });
         return new Promise<T>((resolve, reject) => {
             const timeout = setTimeout(() => {
                 this.pending.delete(id);
+                ocppCallErrorsTotal.inc({ action, error_code: 'Timeout' });
                 reject(new Error(`CALL ${action} (${id}) timed out`));
             }, CALL_TIMEOUT_MS);
             this.pending.set(id, {
                 action,
                 timeout,
+                startedAtSec,
                 resolve: (raw) => resolve(validate ? validate.parse(raw) : (raw as T)),
                 reject,
             });
@@ -168,6 +184,7 @@ export class OcppClient extends EventEmitter {
     private scheduleReconnect(): void {
         if (this.stopped || this.reconnect) return;
         this.reconnectAttempt++;
+        ocppWsReconnectsTotal.inc();
         const backoff = Math.min(30_000, 1000 * 2 ** Math.min(this.reconnectAttempt, 5));
         this.reconnect = setTimeout(() => {
             this.reconnect = null;
@@ -184,18 +201,27 @@ export class OcppClient extends EventEmitter {
             return;
         }
 
+        const deviceType = this.device.type;
         if (frame[0] === MessageType.CALL) {
             const [, id, action, payload] = frame;
+            ocppCallTotal.inc({ action, direction: 'in', device_type: deviceType });
+            ocppFramesTotal.inc({ direction: 'in', frame_type: 'CALL' });
             this.emit('frame', { direction: 'in', id, action, payload });
             void this.handleIncomingCall(id, action, payload);
             return;
         }
         if (frame[0] === MessageType.CALLRESULT) {
             const [, id, payload] = frame;
+            ocppFramesTotal.inc({ direction: 'in', frame_type: 'CALLRESULT' });
             const p = this.pending.get(id);
             if (!p) return;
             this.pending.delete(id);
             clearTimeout(p.timeout);
+            const latency = Date.now() / 1000 - p.startedAtSec;
+            ocppCallLatencySeconds.observe({ action: p.action, device_type: deviceType }, latency);
+            if (p.action === 'BootNotification') {
+                ocppBootLatencySeconds.observe({ device_type: deviceType }, latency);
+            }
             this.emit('frame', { direction: 'in', id, action: p.action, payload });
             try {
                 p.resolve(payload);
@@ -206,10 +232,12 @@ export class OcppClient extends EventEmitter {
         }
         if (frame[0] === MessageType.CALLERROR) {
             const [, id, code, description] = frame;
+            ocppFramesTotal.inc({ direction: 'in', frame_type: 'CALLERROR' });
             const p = this.pending.get(id);
             if (!p) return;
             this.pending.delete(id);
             clearTimeout(p.timeout);
+            ocppCallErrorsTotal.inc({ action: p.action, error_code: String(code) });
             p.reject(new Error(`${code}: ${description}`));
         }
     }

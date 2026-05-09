@@ -25,3 +25,17 @@ Server: <http://localhost:3001> · Web: <http://localhost:5173>
 cd v2
 npm test
 ```
+
+## Observability (optional)
+
+The server exposes `/metrics` in Prometheus text format. Bring up Prometheus + Grafana with the prebuilt dashboard:
+
+```sh
+cd v2
+docker compose up -d
+```
+
+- Prometheus → <http://localhost:9090>
+- Grafana → <http://localhost:3000> (admin / admin), pre-provisioned with an *OCPP Simulator — Overview* dashboard showing CALL rate, p99 latency, errors, frame throughput, and active devices/sessions.
+
+The simulator runs on the host (`npm run dev:server`); only Prometheus and Grafana run in containers. They scrape `host.docker.internal:3001/metrics` so the dev loop stays fast.

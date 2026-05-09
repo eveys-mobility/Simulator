@@ -1,0 +1,13 @@
+global:
+    scrape_interval: 5s
+    evaluation_interval: 15s
+
+scrape_configs:
+    - job_name: ocpp-sim
+      metrics_path: /metrics
+      static_configs:
+          # Compose runs in a separate namespace; the simulator runs on
+          # the host. `host.docker.internal` resolves to the host on
+          # macOS/Windows, and on Linux the extra_hosts mapping in
+          # docker-compose.yml provides the same name.
+          - targets: ['host.docker.internal:3001']

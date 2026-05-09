@@ -1,0 +1,46 @@
+# Local Prometheus + Grafana for the simulator's /metrics endpoint.
+#
+# Usage (server must be running on the host's :3001):
+#   docker compose up -d
+#
+# Prometheus  → http://localhost:9090
+# Grafana     → http://localhost:3000  (admin / admin)
+#
+# The simulator runs *outside* Compose (npm run dev:server) so the dev
+# loop stays fast. Compose only carries the observability stack.
+
+services:
+    prometheus:
+        image: prom/prometheus:v3.0.1
+        container_name: ocpp-sim-prometheus
+        ports:
+            - '9090:9090'
+        volumes:
+            - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+        command:
+            - '--config.file=/etc/prometheus/prometheus.yml'
+            - '--storage.tsdb.retention.time=24h'
+        restart: unless-stopped
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+
+    grafana:
+        image: grafana/grafana:11.3.1
+        container_name: ocpp-sim-grafana
+        ports:
+            - '3000:3000'
+        environment:
+            GF_SECURITY_ADMIN_USER: admin
+            GF_SECURITY_ADMIN_PASSWORD: admin
+            GF_AUTH_ANONYMOUS_ENABLED: 'true'
+            GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+        volumes:
+            - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+            - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+            - grafana-data:/var/lib/grafana
+        depends_on:
+            - prometheus
+        restart: unless-stopped
+
+volumes:
+    grafana-data:
