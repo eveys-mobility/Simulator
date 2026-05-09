@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Play, Trash2 } from 'lucide-react';
-import { fleetApi, FleetCP, FleetGroup, LbStrategy } from './fleet-api';
+import React from 'react';
+import { Trash2 } from 'lucide-react';
+import { fleetApi, FleetCP, FleetGroup } from './fleet-api';
 import { CpTile } from './CpTile';
 
 interface FleetGroupCardProps {
@@ -14,41 +14,6 @@ interface FleetGroupCardProps {
 }
 
 export const FleetGroupCard: React.FC<FleetGroupCardProps> = ({ group, cps, summary, onCpClick, onMutate, onAction }) => {
-    const [busy, setBusy] = useState(false);
-
-    const handleQuickSession = async (): Promise<void> => {
-        if (busy) return;
-        setBusy(true);
-        try {
-            const r = await fleetApi.startSessionInGroup(group.id);
-            onAction(`session started on ${r.cp_id} c${r.connector_id} (${r.id_tag})`);
-        } catch (err: any) {
-            onAction(`session start failed: ${err.message}`);
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    const handleStrategy = async (lb_strategy: LbStrategy): Promise<void> => {
-        try {
-            await fleetApi.patchGroup(group.id, { lb_strategy });
-            onAction(`group ${group.name}: strategy → ${lb_strategy}`);
-            onMutate();
-        } catch (err: any) {
-            onAction(`failed: ${err.message}`);
-        }
-    };
-
-    const handleEnabled = async (lb_enabled: boolean): Promise<void> => {
-        try {
-            await fleetApi.patchGroup(group.id, { lb_enabled });
-            onAction(`group ${group.name}: lb ${lb_enabled ? 'enabled' : 'disabled'}`);
-            onMutate();
-        } catch (err: any) {
-            onAction(`failed: ${err.message}`);
-        }
-    };
-
     const handleDelete = async (): Promise<void> => {
         if (!confirm(`Delete group "${group.name}"? CPs in it will become standalone.`)) return;
         try {
@@ -84,31 +49,6 @@ export const FleetGroupCard: React.FC<FleetGroupCardProps> = ({ group, cps, summ
                     {cps.length} CPs · {activeSessions} active · {totalKw.toFixed(1)} kW
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <input
-                            type="checkbox"
-                            checked={group.lb_enabled === 1}
-                            onChange={(e) => void handleEnabled(e.target.checked)}
-                        />
-                        LB
-                    </label>
-                    <select
-                        value={group.lb_strategy}
-                        disabled={group.lb_enabled !== 1}
-                        onChange={(e) => void handleStrategy(e.target.value as LbStrategy)}
-                        style={{ padding: '0.25rem 0.5rem', borderRadius: '4px' }}
-                    >
-                        <option value="round_robin">round_robin</option>
-                        <option value="least_active">least_active</option>
-                    </select>
-                    <button
-                        className="btn btn-success"
-                        disabled={busy || group.lb_enabled !== 1}
-                        onClick={handleQuickSession}
-                        style={{ padding: '0.4rem 0.8rem' }}
-                    >
-                        <Play size={16} /> Quick session
-                    </button>
                     <button
                         className="btn btn-secondary"
                         onClick={handleDelete}

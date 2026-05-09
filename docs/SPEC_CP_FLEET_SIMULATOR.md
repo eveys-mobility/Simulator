@@ -2,11 +2,11 @@
 
 Status: proposal — implementation MRs follow acceptance.
 
-A multi-CP fleet simulator that connects to the existing OCPP gateway with **real WebSocket connections per CP**, enabling load testing and group/load-balancer correctness testing without changing the gateway.
+A multi-CP fleet simulator that connects to the existing OCPP gateway with **real WebSocket connections per CP**, enabling multi-CP scenario testing without changing the gateway.
 
 ## Why
 
-Today's simulator is one CP per Node process. To exercise gateway scenarios that involve more than one charger — group bookings, fleet-level load balancing, fan-out webhook delivery, OCTT cases that span multiple stations — the right shape is a fleet runtime that holds N independent CPs, each with its own OCPP socket.
+Today's simulator is one CP per Node process. To exercise gateway scenarios that involve more than one charger — fan-out webhook delivery, OCTT cases that span multiple stations, broad smoke tests against the gateway — the right shape is a fleet runtime that holds N independent CPs, each with its own OCPP socket.
 
 Two design constraints make this tractable:
 
@@ -23,8 +23,7 @@ Two design constraints make this tractable:
 | DC connectors | Fixed at 2, but architected to extend | Simulation simplification |
 | Persistence | SQLite (`better-sqlite3`) | Concurrency-safe, survives restart |
 | UI | Same Vite app, new `/fleet` route | Existing single-CP UI untouched |
-| Load balancing v1 | Session-assignment only (round-robin / least-active) | Power-cap distribution = v2 |
-| Load balancing v2 | `SetChargingProfile` distribution | Out of MVP scope |
+| Sessions | Targeted by direct cp_id (no fleet-side LB) | Caller picks CP; system doesn't choose |
 
 ## Architecture
 
@@ -33,11 +32,11 @@ Two design constraints make this tractable:
 │                        FLEET-MANAGER                             │
 │  (Node main process — port :3100, Express + ws + SQLite)        │
 │                                                                  │
-│  ┌──────────┐  ┌────────────┐  ┌────────────┐  ┌─────────────┐ │
-│  │ REST API │  │ WS pub/sub │  │ Registry   │  │ LoadBalancer│ │
-│  └──────────┘  └────────────┘  └────────────┘  └─────────────┘ │
-│        │             │              │                  │        │
-│        └─────────────┴──────────────┴──────────────────┘        │
+│  ┌──────────┐  ┌────────────┐  ┌────────────┐                  │
+│  │ REST API │  │ WS pub/sub │  │ Registry   │                  │
+│  └──────────┘  └────────────┘  └────────────┘                  │
+│        │             │              │                            │
+│        └─────────────┴──────────────┘                            │
 │                              │                                   │
 │                  ┌───────────┴───────────┐                       │
 │                  │    WorkerSupervisor   │                       │
@@ -73,9 +72,8 @@ Components and their responsibility boundaries:
 
 - **CP-WORKER**: a worker thread that wraps `ChargePoint` + `TransactionManager` + `AuthorizationManager` from `backend/src/ocpp/`. Holds exactly one OCPP WebSocket. Implements its own meter-tick loop. Sends/receives parent messages over `parentPort`.
 - **WorkerSupervisor**: spawns workers, restarts them with exponential backoff, attributes worker crashes to a CP id, terminates them on shutdown.
-- **Registry**: in-memory authoritative state for the fleet — every CP, its status, its assigned group, its active session if any. Backed by SQLite snapshots, but reads come from memory.
-- **LoadBalancer**: pure function — given (group, request) returns a CP id (or null). Doesn't mutate; the API caller mutates.
-- **REST API**: CRUD for groups + CPs + sessions + LB config.
+- **Registry**: in-memory authoritative state for the fleet — every CP, its status, its group, its active session if any. Backed by SQLite snapshots, but reads come from memory.
+- **REST API**: CRUD for groups + CPs + per-CP actions; sessions list (read-only).
 - **WS pub/sub**: broadcasts state changes to UI clients.
 
 ## Data model
@@ -87,10 +85,10 @@ Components and their responsibility boundaries:
 │ id (PK)         │   ┌───│ id (PK)         │       │ id (PK)         │
 │ name            │   │   │ cp_id (UNIQUE)  │       │ cp_id (FK)      │
 │ type ('AC'|'DC')│◄──┘   │ type ('AC'|'DC')│       │ connector_id    │
-│ lb_strategy     │       │ group_id (FK)   │◄──────│ id_tag          │
-│ lb_enabled      │       │ phase_mode      │       │ status          │
-│ created_at      │       │ dc_profile (json)│      │ started_at      │
-└─────────────────┘       │ created_at      │       │ ended_at        │
+│ created_at      │       │ group_id (FK)   │◄──────│ id_tag          │
+└─────────────────┘       │ phase_mode      │       │ status          │
+                          │ dc_profile(json)│       │ started_at      │
+                          │ created_at      │       │ ended_at        │
                           └─────────────────┘       │ end_reason      │
                                                     │ energy_wh       │
                                                     │ peak_power_kw   │
@@ -106,8 +104,6 @@ CREATE TABLE groups (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE,
     type        TEXT NOT NULL CHECK (type IN ('AC', 'DC')),
-    lb_strategy TEXT NOT NULL DEFAULT 'round_robin' CHECK (lb_strategy IN ('round_robin', 'least_active')),
-    lb_enabled  INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -213,42 +209,20 @@ State machine per connector (matches OCPP `ChargePointStatus`):
 
 `emergency_stop` is the only edge that's allowed from any state. It sends `StopTransaction reason=EmergencyStop`, transitions to `Faulted`, requires explicit reset.
 
-## Load balancing (v1: session assignment)
+## Sessions
 
-Pure function over the registry:
+Sessions are started by directly targeting a CP through its action endpoints (`POST /fleet/cps/:cp_id/actions/plug-in` then `/start`). The fleet runtime does not pick CPs for the caller — there is no session-assignment LB. Groups are organisational labels for the UI; they don't drive session routing.
 
-```ts
-function pickCp(group: Group, registry: Registry): string | null {
-    const candidates = registry.cps
-        .filter(cp => cp.group_id === group.id)
-        .filter(cp => cp.status === 'Available' && !cp.has_active_session);
-    if (candidates.length === 0) return null;
+If you want a script to spread sessions across CPs in some pattern (round-robin, random, biased, etc.), do it client-side by iterating cp_ids — see `fleet/scripts/load-test.ts` for an example. Keeping this concern out of the simulator means the gateway sees the same calling pattern as a real CSMS would: a session targets a specific charger.
 
-    if (group.lb_strategy === 'round_robin') {
-        // Persist last-picked-index per group; advance on each pick.
-        return candidates[(group.lb_round_robin_cursor ?? 0) % candidates.length].cp_id;
-    }
-    // 'least_active' — break ties with cp_id for determinism
-    return candidates.sort((a, b) =>
-        a.active_session_count - b.active_session_count || a.cp_id.localeCompare(b.cp_id)
-    )[0].cp_id;
-}
-```
-
-Triggered by `POST /fleet/groups/:id/sessions` (UI action: "start a session somewhere in this group"). If LB is disabled on the group, the request must specify `cp_id` directly; the LB is bypassed.
-
-DC connector picking (within a chosen DC CP) goes for the lower-numbered free connector. This isn't strictly load balancing, but the prompt asks for "session assignment" to be even, so for DC the LB picks the *connector* the same way it picks AC CPs.
-
-## Load balancing (v2 — out of MVP, design hook only)
-
-Power-cap distribution will use `SetChargingProfile`. Hook: a `SiteCapManager` watches every `meter_tick` from the fleet, sums kW within each AC group, and when the sum approaches `group.power_cap_kw` (a future column), issues `SetChargingProfile` to the active sessions to throttle them. This is OCPP-conformant and matches what real fleet EVSEs do. Out of MVP because it requires gateway changes (the gateway must be willing to forward `SetChargingProfile` to a charger and accept the response).
+Power-cap distribution via `SetChargingProfile` is a separate concern and would require gateway-side support to forward profiles to a charger; not currently in scope.
 
 ## REST API (fleet manager — port :3100)
 
 ```
 GET  /fleet/groups                             # list groups
-POST /fleet/groups                             # body: {name, type, lb_strategy?, lb_enabled?}
-PATCH /fleet/groups/:id                        # body: any updatable field
+POST /fleet/groups                             # body: {name, type}
+PATCH /fleet/groups/:id                        # body: {name?}
 DELETE /fleet/groups/:id                       # cascades cp.group_id = NULL
 
 GET  /fleet/cps                                # list CPs (filter: ?group_id=)
@@ -259,12 +233,13 @@ DELETE /fleet/cps/:cp_id                       # terminates worker, removes row
 POST /fleet/cps/:cp_id/actions/plug-in         # body: {connector_id, id_tag}
 POST /fleet/cps/:cp_id/actions/start           # body: {connector_id}
 POST /fleet/cps/:cp_id/actions/stop            # body: {connector_id, reason?}
+POST /fleet/cps/:cp_id/actions/pause           # body: {connector_id}
+POST /fleet/cps/:cp_id/actions/resume          # body: {connector_id}
 POST /fleet/cps/:cp_id/actions/plug-out        # body: {connector_id}
 POST /fleet/cps/:cp_id/actions/emergency-stop  # body: {connector_id}
+POST /fleet/cps/:cp_id/actions/fault           # body: {connector_id, clear_after_seconds?}
 
-POST /fleet/groups/:id/sessions                # body: {id_tag} → LB picks a CP
-GET  /fleet/sessions                           # filter: ?status=, ?group_id=, ?since=
-GET  /fleet/sessions/:id                       # full session record + history
+GET  /fleet/sessions                           # filter: ?status=, ?cp_id=, ?limit=
 ```
 
 All endpoints return `{success, data?, error?}`. Errors carry HTTP 4xx/5xx and a structured `code`.
@@ -288,20 +263,17 @@ Per-CP `meter_tick` is *not* broadcast on this channel — the cardinality is to
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                    │
 │  ┌─ Group: AC-A ─────────────── 100 CPs · 12 active · 142 kW ─┐  │
-│  │ LB: ⏼ on   strategy: ▾ round_robin                          │  │
 │  │                                                             │  │
 │  │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐  │  │
-│  │  │ AC-A-001 │ AC-A-002 │ AC-A-003 │ AC-A-004 │ AC-A-005 │  │  │
+│  │  │ cp_a4… ▾ │ cp_b1… ▾ │ cp_c8… ▾ │ cp_d2… ▾ │ cp_e7… ▾ │  │  │
 │  │  │ ⚡ 14 kW │   idle   │ ⚡ 22 kW │   idle   │   idle   │  │  │
 │  │  └──────────┴──────────┴──────────┴──────────┴──────────┘  │  │
 │  │  …                                                          │  │
-│  │  [Quick session ▾]                                          │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                    │
 │  ┌─ Group: DC-B ──────────────── 10 CPs · 3 active · 175 kW ──┐  │
-│  │ LB: ⏼ on   strategy: ▾ least_active                         │  │
 │  │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐  │  │
-│  │  │ DC-B-001 │ DC-B-002 │ DC-B-003 │ DC-B-004 │ DC-B-005 │  │  │
+│  │  │ cp_dc1 ▾ │ cp_dc2 ▾ │ cp_dc3 ▾ │ cp_dc4 ▾ │ cp_dc5 ▾ │  │  │
 │  │  │ 50 kW    │ 75 kW    │   idle   │ 50 kW    │   idle   │  │  │
 │  │  │ 42% SoC  │ 67% SoC  │          │ 31% SoC  │          │  │  │
 │  │  └──────────┴──────────┴──────────┴──────────┴──────────┘  │  │
@@ -309,18 +281,20 @@ Per-CP `meter_tick` is *not* broadcast on this channel — the cardinality is to
 │                                                                    │
 │  ┌─ Active sessions ────────────────────────────────────────────┐ │
 │  │ tx_id    cp_id      connector  id_tag       since   energy  │ │
-│  │ 12       AC-A-001   1          USR_01       3m12s   0.78kWh │ │
-│  │ 13       AC-A-003   1          USR_02       1m04s   0.32kWh │ │
+│  │ 12       cp_a4f3c2  1          USR_01       3m12s   0.78kWh │ │
+│  │ 13       cp_c8e7a1  1          USR_02       1m04s   0.32kWh │ │
 │  │ …                                                           │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+Sessions are started by clicking through a CP tile into the deep-linked single-CP detail view (`/?cp=<cp_id>`), where the existing Start/Pause/Resume/Stop controls run. The fleet page itself only does CRUD + the active-sessions overview; it doesn't have a "start a session" button on the group, because the simulator doesn't pick CPs for the user.
+
 Component breakdown:
 
-- `FleetGroupCard` — header with rollup, LB controls, grid of `CpTile`s.
-- `CpTile` — small status cell, color-coded (green idle, blue charging, red faulted), click-through to single-CP UI on `:3001` (deep link with `?cp=AC-A-001`).
-- `ActiveSessionsTable` — virtualized for >100 rows.
+- `FleetGroupCard` — header with rollup, delete button, grid of `CpTile`s.
+- `CpTile` — small status cell, color-coded (green idle, blue charging, red faulted), click-through to single-CP UI via `?cp=<cp_id>`.
+- `ActiveSessionsTable` — sessions across the fleet, with stop / fault buttons.
 - `NewGroupDialog` / `NewCpDialog` — simple forms, post to REST.
 
 ## File / process layout
@@ -337,15 +311,13 @@ fleet/                              ← NEW
     supervisor.ts                   ← spawn/restart workers
     worker.ts                       ← thread entry; imports backend/src/ocpp/*
     protocol.ts                     ← Down/Up message types
-    load-balancer.ts                ← pickCp + strategy implementations
     api.ts                          ← REST routes
     pubsub.ts                       ← WS broadcast
-    fixtures.ts                     ← bootstrap default groups for dev
   test/
-    load-balancer.test.ts
     registry.test.ts
     protocol.test.ts
     sqlite.test.ts
+    supervisor.test.ts
 frontend/src/pages/Fleet/           ← NEW
     FleetPage.tsx                   ← /fleet route entry
     FleetGroupCard.tsx
@@ -382,10 +354,10 @@ docs/SPEC_CP_FLEET_SIMULATOR.md     ← this file
 
 Unit (per package):
 
-- `load-balancer.test.ts`: round-robin advances cursor, least-active picks lowest, both filter unavailable CPs, both return null when group is empty.
 - `registry.test.ts`: add CP, remove CP, group attach/detach, snapshot to SQLite + reload roundtrip equal.
 - `protocol.test.ts`: every Down message round-trips through `JSON.parse(JSON.stringify(...))`.
 - `sqlite.test.ts`: schema migration is idempotent.
+- `supervisor.test.ts`: session_started/ended persistence, peak power tracking, online/offline patches, watchdog termination.
 
 Integration (against running gateway):
 
@@ -405,9 +377,9 @@ Five MRs after this spec lands. Each is independently reviewable.
 
 | MR | Scope | LOC est. |
 |---|---|---|
-| MR-D | Fleet skeleton: supervisor, worker thread, REST `/fleet/cps`, in-memory registry. **No persistence, no LB, no UI.** Spawn N CPs by env var, watch them connect. | ~600 |
+| MR-D | Fleet skeleton: supervisor, worker thread, REST `/fleet/cps`, in-memory registry. Spawn N CPs by env var, watch them connect. | ~600 |
 | MR-E | SQLite persistence + groups CRUD. Snapshot/restore on boot. | ~400 |
-| MR-F | LoadBalancer + session-start API + WS pub/sub for UI consumers. | ~350 |
+| MR-F | WS pub/sub for UI consumers (per-CP subscribe; per-group rollups). | ~250 |
 | MR-G | Fleet admin UI: `/fleet` route, group cards, CP tiles, sessions table. | ~700 |
 | MR-H (optional) | Fault injection toggle, worker heartbeat, performance hardening. | ~250 |
 

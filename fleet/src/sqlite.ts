@@ -16,16 +16,12 @@ import Database, { Database as DatabaseType, Statement } from 'better-sqlite3';
 import * as path from 'node:path';
 import { CPType, PhaseMode, DCBatteryProfile } from './protocol';
 
-export type LbStrategy = 'round_robin' | 'least_active';
 export type SessionStatus = 'active' | 'completed' | 'aborted';
 
 export interface GroupRow {
     id: number;
     name: string;
     type: CPType;
-    lb_strategy: LbStrategy;
-    lb_enabled: number;          // SQLite stores BOOLEAN as INTEGER 0/1
-    lb_round_robin_cursor: number; // monotonic count of round_robin picks
     created_at: string;
 }
 
@@ -57,13 +53,10 @@ export interface SessionRow {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS groups (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    name                  TEXT NOT NULL UNIQUE,
-    type                  TEXT NOT NULL CHECK (type IN ('AC', 'DC')),
-    lb_strategy           TEXT NOT NULL DEFAULT 'round_robin' CHECK (lb_strategy IN ('round_robin', 'least_active')),
-    lb_enabled            INTEGER NOT NULL DEFAULT 1,
-    lb_round_robin_cursor INTEGER NOT NULL DEFAULT 0,
-    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    type        TEXT NOT NULL CHECK (type IN ('AC', 'DC')),
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS charge_points (
@@ -133,14 +126,12 @@ export class FleetStore {
         this.migrate();
 
         this.groupInsert = this.db.prepare(`
-            INSERT INTO groups (name, type, lb_strategy, lb_enabled)
-            VALUES (@name, @type, @lb_strategy, @lb_enabled)
+            INSERT INTO groups (name, type)
+            VALUES (@name, @type)
         `);
         this.groupUpdate = this.db.prepare(`
             UPDATE groups
-               SET name        = COALESCE(@name, name),
-                   lb_strategy = COALESCE(@lb_strategy, lb_strategy),
-                   lb_enabled  = COALESCE(@lb_enabled, lb_enabled)
+               SET name = COALESCE(@name, name)
              WHERE id = @id
         `);
         this.groupDelete = this.db.prepare(`DELETE FROM groups WHERE id = ?`);
@@ -196,30 +187,16 @@ export class FleetStore {
     }
 
     /**
-     * Backwards-compatible column adds. SQLite's ALTER TABLE only
-     * supports `ADD COLUMN`, never DROP / MODIFY, so each migration
-     * step is a no-op once applied. We use `pragma table_info` to
-     * detect what's present rather than tracking a schema_version
-     * counter — at v1 scale, this is plenty.
+     * Schema migration hook for in-place upgrades on existing fleet
+     * SQLite files. Currently a no-op — SCHEMA's `CREATE TABLE IF NOT
+     * EXISTS` covers fresh DBs, and old DBs that carry pre-removal
+     * columns (e.g. lb_strategy, lb_round_robin_cursor on groups)
+     * keep them as harmless orphans. SQLite's `ALTER TABLE ... DROP
+     * COLUMN` is supported on recent versions; if a clean cleanup is
+     * ever wanted, append a step here.
      */
     private migrate(): void {
-        const groupCols = (this.db.pragma('table_info(groups)') as Array<{ name: string }>)
-            .map((c) => c.name);
-        if (!groupCols.includes('lb_round_robin_cursor')) {
-            this.db.exec('ALTER TABLE groups ADD COLUMN lb_round_robin_cursor INTEGER NOT NULL DEFAULT 0');
-        }
-    }
-
-    /**
-     * Atomically increment a group's round-robin cursor and return
-     * the new value. Used by the load balancer to pick the next CP
-     * in a stable, restart-survivable rotation.
-     */
-    advanceRoundRobinCursor(groupId: number): number {
-        const row = this.db
-            .prepare('UPDATE groups SET lb_round_robin_cursor = lb_round_robin_cursor + 1 WHERE id = ? RETURNING lb_round_robin_cursor')
-            .get(groupId) as { lb_round_robin_cursor: number } | undefined;
-        return row?.lb_round_robin_cursor ?? 0;
+        // intentionally empty
     }
 
     /**
@@ -236,12 +213,10 @@ export class FleetStore {
 
     // ---- groups ----
 
-    createGroup(args: { name: string; type: CPType; lb_strategy?: LbStrategy; lb_enabled?: boolean }): GroupRow {
+    createGroup(args: { name: string; type: CPType }): GroupRow {
         const result = this.groupInsert.run({
             name: args.name,
             type: args.type,
-            lb_strategy: args.lb_strategy ?? 'round_robin',
-            lb_enabled: args.lb_enabled === false ? 0 : 1,
         });
         const row = this.groupSelectById.get(result.lastInsertRowid) as GroupRow | undefined;
         if (!row) throw new Error(`group ${args.name} created but vanished`);
@@ -260,12 +235,10 @@ export class FleetStore {
         return this.groupSelectByName.get(name) as GroupRow | undefined;
     }
 
-    updateGroup(id: number, patch: Partial<{ name: string; lb_strategy: LbStrategy; lb_enabled: boolean }>): GroupRow | undefined {
+    updateGroup(id: number, patch: Partial<{ name: string }>): GroupRow | undefined {
         this.groupUpdate.run({
             id,
             name: patch.name ?? null,
-            lb_strategy: patch.lb_strategy ?? null,
-            lb_enabled: patch.lb_enabled === undefined ? null : (patch.lb_enabled ? 1 : 0),
         });
         return this.getGroup(id);
     }

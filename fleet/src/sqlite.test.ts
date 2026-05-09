@@ -32,13 +32,12 @@ describe('FleetStore — groups', () => {
     test('create + list + get', () => {
         const s = store();
         const g1 = s.createGroup({ name: 'AC-A', type: 'AC' });
-        const g2 = s.createGroup({ name: 'DC-B', type: 'DC', lb_strategy: 'least_active', lb_enabled: false });
+        const g2 = s.createGroup({ name: 'DC-B', type: 'DC' });
         const all = s.listGroups();
         assert.equal(all.length, 2);
         assert.equal(s.getGroup(g1.id)?.name, 'AC-A');
         assert.equal(s.getGroupByName('DC-B')?.id, g2.id);
-        assert.equal(g2.lb_strategy, 'least_active');
-        assert.equal(g2.lb_enabled, 0);
+        assert.equal(g2.type, 'DC');
         s.close();
     });
 
@@ -49,13 +48,14 @@ describe('FleetStore — groups', () => {
         s.close();
     });
 
-    test('update merges only provided fields', () => {
+    test('update only changes provided fields', () => {
         const s = store();
         const g = s.createGroup({ name: 'g', type: 'AC' });
-        s.updateGroup(g.id, { lb_strategy: 'least_active' });
+        s.updateGroup(g.id, { name: 'g-renamed' });
         const updated = s.getGroup(g.id)!;
-        assert.equal(updated.name, 'g');                  // unchanged
-        assert.equal(updated.lb_strategy, 'least_active'); // changed
+        assert.equal(updated.name, 'g-renamed');
+        assert.equal(updated.type, 'AC');                 // unchanged
+        s.close();
     });
 
     test('delete returns true when row existed, false otherwise', () => {
@@ -210,7 +210,7 @@ describe('FleetStore — boot reload roundtrip', () => {
         t.after(() => { try { require('node:fs').unlinkSync(tmp); } catch {} });
 
         const s1 = new FleetStore(tmp);
-        const g = s1.createGroup({ name: 'g', type: 'AC', lb_strategy: 'least_active' });
+        const g = s1.createGroup({ name: 'g', type: 'AC' });
         s1.createCP({ cp_id: 'cp_a', display_name: 'A', type: 'AC', group_id: g.id, phase_mode: 'imbalanced' });
         s1.createCP({ cp_id: 'cp_b', display_name: 'B', type: 'DC', dc_profile: { capacity_kwh: 75, charger_max_kw: 150 } });
         s1.close();
@@ -218,7 +218,7 @@ describe('FleetStore — boot reload roundtrip', () => {
         const s2 = new FleetStore(tmp);
         const groups = s2.listGroups();
         assert.equal(groups.length, 1);
-        assert.equal(groups[0].lb_strategy, 'least_active');
+        assert.equal(groups[0].name, 'g');
         const cps = s2.listCPs();
         assert.equal(cps.length, 2);
         const a = cps.find((c) => c.cp_id === 'cp_a')!;
