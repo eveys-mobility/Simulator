@@ -14,6 +14,23 @@ const store = new Store(DB_PATH);
 const aborted = store.abortOrphanedSessions();
 if (aborted) console.log(`[server] aborted ${aborted} orphaned active session(s) from prior run`);
 
+// Mark any benchmark_runs row left at status='running' as failed —
+// the engine isn't around to advance it. Delete every leftover
+// `bench_*` synthetic device since their owning run is gone.
+const failedRuns = store.failOrphanedBenchmarkRuns();
+if (failedRuns) console.log(`[server] failed ${failedRuns} orphaned benchmark run(s) from prior run`);
+
+let benchDevicesCleaned = 0;
+for (const d of store.listDevices()) {
+    if (d.id.startsWith('bench_')) {
+        store.deleteDevice(d.id);
+        benchDevicesCleaned++;
+    }
+}
+if (benchDevicesCleaned) {
+    console.log(`[server] removed ${benchDevicesCleaned} leftover bench_* device(s) from prior run`);
+}
+
 // Resolve initial default OCPP URL: persisted setting (if any) wins,
 // otherwise the env var, otherwise localhost. Subsequent edits via the
 // /api/settings endpoint update only the persisted value.

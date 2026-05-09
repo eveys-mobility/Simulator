@@ -1,5 +1,16 @@
 import Database from 'better-sqlite3';
-import type { AcWiring, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
+import type {
+    AcWiring,
+    BenchmarkRun,
+    BenchmarkRunSummary,
+    DCBatteryProfile,
+    Device,
+    DeviceType,
+    PhaseMode,
+    Scenario,
+    ScenarioStatus,
+    Session,
+} from '@ocpp-sim/core';
 
 /**
  * SQLite-backed store. Single file, two tables. Schema is versioned
@@ -246,6 +257,68 @@ export class Store {
             .run(key, value);
     }
 
+    // ---- benchmark runs ----
+
+    insertBenchmarkRun(scenario: Scenario, startedAt: string): number {
+        const r = this.db
+            .prepare(
+                `INSERT INTO benchmark_runs (scenario, status, started_at)
+                 VALUES (?, 'running', ?)`,
+            )
+            .run(JSON.stringify(scenario), startedAt);
+        return Number(r.lastInsertRowid);
+    }
+
+    endBenchmarkRun(args: {
+        id: number;
+        status: ScenarioStatus;
+        endedAt: string;
+        summary: BenchmarkRunSummary;
+    }): void {
+        this.db
+            .prepare(
+                `UPDATE benchmark_runs
+                 SET status = @status, ended_at = @endedAt, summary = @summary
+                 WHERE id = @id`,
+            )
+            .run({
+                id: args.id,
+                status: args.status,
+                endedAt: args.endedAt,
+                summary: JSON.stringify(args.summary),
+            });
+    }
+
+    listBenchmarkRuns(args: { limit?: number; offset?: number } = {}): { runs: BenchmarkRun[]; total: number } {
+        const limit = Math.max(1, Math.min(200, args.limit ?? 50));
+        const offset = Math.max(0, args.offset ?? 0);
+        const rows = this.db
+            .prepare(`SELECT * FROM benchmark_runs ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+            .all(limit, offset) as BenchmarkRunRow[];
+        const total = (this.db.prepare(`SELECT COUNT(*) as n FROM benchmark_runs`).get() as { n: number }).n;
+        return { runs: rows.map(rowToBenchmarkRun), total };
+    }
+
+    getBenchmarkRun(id: number): BenchmarkRun | null {
+        const row = this.db.prepare(`SELECT * FROM benchmark_runs WHERE id = ?`).get(id) as
+            | BenchmarkRunRow
+            | undefined;
+        return row ? rowToBenchmarkRun(row) : null;
+    }
+
+    /** Mark every still-running run as failed. Used at boot so a
+     *  crashed run doesn't show as "running" forever. */
+    failOrphanedBenchmarkRuns(): number {
+        const now = new Date().toISOString();
+        const r = this.db
+            .prepare(
+                `UPDATE benchmark_runs SET status = 'failed', ended_at = COALESCE(ended_at, ?)
+                 WHERE status = 'running'`,
+            )
+            .run(now);
+        return r.changes;
+    }
+
     /**
      * Drop every row from every table, keeping the schema in place.
      * The destructive path: used by POST /api/settings/reset. The
@@ -260,7 +333,8 @@ export class Store {
                 DELETE FROM device_config;
                 DELETE FROM devices;
                 DELETE FROM app_settings;
-                DELETE FROM sqlite_sequence WHERE name IN ('sessions');
+                DELETE FROM benchmark_runs;
+                DELETE FROM sqlite_sequence WHERE name IN ('sessions','benchmark_runs');
             `);
         });
         tx();
@@ -296,6 +370,26 @@ function rowToDevice(r: DeviceRow): Device {
         acWiring: r.ac_wiring ? (JSON.parse(r.ac_wiring) as AcWiring) : undefined,
         dcProfile: r.dc_profile ? (JSON.parse(r.dc_profile) as DCBatteryProfile) : undefined,
         createdAt: r.created_at,
+    };
+}
+
+interface BenchmarkRunRow {
+    id: number;
+    scenario: string;
+    status: string;
+    started_at: string;
+    ended_at: string | null;
+    summary: string | null;
+}
+
+function rowToBenchmarkRun(r: BenchmarkRunRow): BenchmarkRun {
+    return {
+        id: r.id,
+        scenario: JSON.parse(r.scenario) as Scenario,
+        status: r.status as ScenarioStatus,
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        summary: r.summary ? (JSON.parse(r.summary) as BenchmarkRunSummary) : null,
     };
 }
 
@@ -420,6 +514,21 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // as dc_profile: small, optional, easier to evolve than columns.
     (db) => {
         db.exec(`ALTER TABLE devices ADD COLUMN ac_wiring TEXT`);
+    },
+    // v5 — benchmark runs (Phase 7b). One row per scenario invocation.
+    // Scenario + summary stored as JSON because both shapes evolve.
+    (db) => {
+        db.exec(`
+            CREATE TABLE benchmark_runs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario     TEXT NOT NULL,
+                status       TEXT NOT NULL CHECK(status IN ('running','completed','stopped','failed')),
+                started_at   TEXT NOT NULL,
+                ended_at     TEXT,
+                summary      TEXT
+            );
+            CREATE INDEX benchmark_runs_status ON benchmark_runs(status);
+        `);
     },
 ];
 

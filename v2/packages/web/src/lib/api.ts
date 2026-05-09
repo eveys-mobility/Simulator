@@ -98,6 +98,28 @@ export const api = {
 
     fleetEmergencyStop: () => http<{ stopped: number }>('POST', '/fleet/emergency-stop'),
 
+    listBenchmarkPresets: () =>
+        http<Array<{ key: string; label: string; scenario: import('@ocpp-sim/core').Scenario }>>(
+            'GET',
+            '/benchmark/presets',
+        ),
+    listBenchmarkRuns: (q: { limit?: number; offset?: number } = {}) => {
+        const params = new URLSearchParams();
+        if (q.limit !== undefined) params.set('limit', String(q.limit));
+        if (q.offset !== undefined) params.set('offset', String(q.offset));
+        const qs = params.toString();
+        return http<{ runs: import('@ocpp-sim/core').BenchmarkRun[]; total: number }>(
+            'GET',
+            `/benchmark/runs${qs ? '?' + qs : ''}`,
+        );
+    },
+    getBenchmarkRun: (id: number) =>
+        http<import('@ocpp-sim/core').BenchmarkRun>('GET', `/benchmark/runs/${id}`),
+    startBenchmarkRun: (scenario: import('@ocpp-sim/core').Scenario) =>
+        http<import('@ocpp-sim/core').BenchmarkRun>('POST', '/benchmark/runs', scenario),
+    stopBenchmarkRun: (id: number) =>
+        http<{ ok: true }>('POST', `/benchmark/runs/${id}/stop`),
+
     fleetStopAll: () =>
         http<{ devices: number; sessionsStopped: number }>('POST', '/fleet/stop-all'),
 
