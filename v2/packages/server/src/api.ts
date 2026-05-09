@@ -46,31 +46,82 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         return devices.map((d) => withRuntime(d, manager));
     });
 
-    app.post('/api/devices', async (req, reply) => {
-        const body = CreateDeviceBody.safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: body.error.message });
+    /** Build a fully-defaulted Device row from a partial spec. Used by
+     *  both the single-device POST and the bulk endpoint so the two
+     *  can't drift on what "fresh device" means. */
+    const buildDevice = (input: {
+        type: 'AC' | 'DC';
+        displayName?: string;
+        maxPowerKw?: number;
+        ocppUrl?: string;
+        phaseMode?: 'balanced' | 'imbalanced' | 'single-phase';
+        dcProfile?: Partial<z.infer<typeof DCBatteryProfileSchema>>;
+    }): Device => {
         const id = `cp_${uuid().slice(0, 8)}`;
-        const defaults = DEVICE_DEFAULTS[body.data.type];
-        const device: Device = {
+        const defaults = DEVICE_DEFAULTS[input.type];
+        return {
             id,
-            displayName: body.data.displayName ?? `${body.data.type} ${id}`,
-            type: body.data.type,
+            displayName: input.displayName ?? `${input.type} ${id}`,
+            type: input.type,
             model: defaults.model,
             vendor: 'Eveys',
             firmwareVersion: '1.0.0',
-            maxPowerKw: body.data.maxPowerKw ?? defaults.maxPowerKw,
-            ocppUrl: body.data.ocppUrl ?? currentDefaultOcppUrl,
-            phaseMode: body.data.phaseMode ?? 'balanced',
-            acWiring: body.data.type === 'AC' ? DEFAULT_AC_WIRING : undefined,
+            maxPowerKw: input.maxPowerKw ?? defaults.maxPowerKw,
+            ocppUrl: input.ocppUrl ?? currentDefaultOcppUrl,
+            phaseMode: input.phaseMode ?? 'balanced',
+            acWiring: input.type === 'AC' ? DEFAULT_AC_WIRING : undefined,
             dcProfile:
-                body.data.type === 'DC'
-                    ? { ...DCBatteryProfileSchema.parse({ capacityKwh: 60, chargerMaxKw: defaults.maxPowerKw }), ...body.data.dcProfile }
+                input.type === 'DC'
+                    ? { ...DCBatteryProfileSchema.parse({ capacityKwh: 60, chargerMaxKw: defaults.maxPowerKw }), ...input.dcProfile }
                     : undefined,
             createdAt: new Date().toISOString(),
         };
+    };
+
+    app.post('/api/devices', async (req, reply) => {
+        const body = CreateDeviceBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const device = buildDevice(body.data);
         store.insertDevice(device);
         await manager.spawn(device);
         return withRuntime(device, manager);
+    });
+
+    // ---- BULK DEVICE CREATE ----
+    //
+    // Spawns N devices with a small stagger between WS opens so the
+    // gateway doesn't see a thundering herd. Returns the persisted
+    // rows immediately; the OCPP boot/reconnect happens async on each
+    // worker the same way single-create does.
+
+    const BulkCreateBody = z.object({
+        count: z.number().int().positive().max(200),
+        type: DeviceTypeSchema,
+        namePrefix: z.string().min(1).max(40).optional(),
+        ocppUrl: z.string().url().optional(),
+        staggerMs: z.number().int().min(0).max(5000).default(200),
+    });
+
+    app.post('/api/devices/bulk', async (req, reply) => {
+        const body = BulkCreateBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        const created: Device[] = [];
+        for (let i = 0; i < body.data.count; i++) {
+            const d = buildDevice({
+                type: body.data.type,
+                displayName: body.data.namePrefix ? `${body.data.namePrefix} ${i + 1}` : undefined,
+                ocppUrl: body.data.ocppUrl,
+            });
+            store.insertDevice(d);
+            created.push(d);
+            // Don't await spawn() — fire-and-forget so the response
+            // doesn't block on N WebSocket handshakes.
+            void manager.spawn(d);
+            if (body.data.staggerMs > 0 && i < body.data.count - 1) {
+                await new Promise((r) => setTimeout(r, body.data.staggerMs));
+            }
+        }
+        return { created: created.length, devices: created.map((d) => withRuntime(d, manager)) };
     });
 
     app.get<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
@@ -369,6 +420,126 @@ export async function buildServer({ store, manager, defaultOcppUrl }: BuildArgs)
         } catch (err) {
             return reply.code(500).send({ error: (err as Error).message });
         }
+    });
+
+    // ---- FLEET OPERATIONS ----
+    //
+    // Coarse-grained, multi-device commands. Each loops over the
+    // currently-spawned Simulator pool. None of these touch persistent
+    // device rows — they exercise live runtime state.
+
+    const StartFractionBody = z.object({
+        fraction: z.number().min(0).max(1),
+        idTag: z.string().min(1).max(20).default('TEST-TAG-001'),
+    });
+
+    app.post('/api/fleet/start', async (req, reply) => {
+        const body = StartFractionBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+
+        // Build the eligible-connector pool: online device, connector
+        // Available, no active transaction, operative. Sample randomly
+        // up to the requested fraction to spread load realistically.
+        type Target = { sim: ReturnType<typeof manager.get>; connectorId: number };
+        const targets: Target[] = [];
+        for (const sim of manager.list()) {
+            const snap = sim.snapshot();
+            if (!snap.online) continue;
+            for (const c of snap.connectors) {
+                if (c.status === 'Available' && c.transactionId === null) {
+                    targets.push({ sim, connectorId: c.id });
+                }
+            }
+        }
+        // Fisher–Yates shuffle so the picked subset is random.
+        for (let i = targets.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [targets[i], targets[j]] = [targets[j]!, targets[i]!];
+        }
+        const want = Math.floor(targets.length * body.data.fraction);
+        const picked = targets.slice(0, want);
+
+        let started = 0;
+        const errors: string[] = [];
+        for (const t of picked) {
+            try {
+                if (!t.sim) continue;
+                const sessionRowId = store.insertSession({
+                    deviceId: t.sim.device.id,
+                    connectorId: t.connectorId,
+                    transactionId: 0,
+                    idTag: body.data.idTag,
+                    status: 'active',
+                    startedAt: new Date().toISOString(),
+                    endedAt: null,
+                    endReason: null,
+                    energyWh: 0,
+                    peakPowerKw: 0,
+                });
+                const txId = await t.sim.startSession(t.connectorId, body.data.idTag, sessionRowId);
+                store.db.prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`).run(txId, sessionRowId);
+                started++;
+            } catch (err) {
+                errors.push((err as Error).message);
+            }
+        }
+        return { eligible: targets.length, picked: picked.length, started, errors: errors.slice(0, 10) };
+    });
+
+    app.post('/api/fleet/reconnect', async () => {
+        const sims = manager.list();
+        for (const sim of sims) {
+            // Soft reboot is a clean disconnect → schedules its own
+            // reconnect via OcppClient's backoff. Don't await — fire
+            // them all in parallel so the test surfaces concurrency.
+            sim.reboot('Soft').catch(() => undefined);
+        }
+        return { reconnecting: sims.length };
+    });
+
+    const HeartbeatIntervalBody = z.object({
+        seconds: z.number().int().positive().max(86400),
+    });
+
+    app.post('/api/fleet/heartbeat-interval', async (req, reply) => {
+        const body = HeartbeatIntervalBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: body.error.message });
+        let updated = 0;
+        for (const sim of manager.list()) {
+            const status = sim.setOcppConfig('HeartbeatInterval', String(body.data.seconds));
+            if (status === 'Accepted' || status === 'RebootRequired') updated++;
+        }
+        return { updated, seconds: body.data.seconds };
+    });
+
+    app.post('/api/fleet/emergency-stop', async () => {
+        const sims = manager.list();
+        await Promise.all(sims.map((sim) => sim.emergencyStop().catch(() => undefined)));
+        return { stopped: sims.length };
+    });
+
+    /** Cheap rollup for the Fleet Ops dashboard header. */
+    app.get('/api/fleet/summary', async () => {
+        let total = 0;
+        let online = 0;
+        let charging = 0;
+        let active_connectors = 0;
+        for (const sim of manager.list()) {
+            total++;
+            const snap = sim.snapshot();
+            if (snap.online) online++;
+            for (const c of snap.connectors) {
+                if (c.transactionId !== null) charging++;
+                if (c.status !== 'Unavailable') active_connectors++;
+            }
+        }
+        return {
+            total,
+            online,
+            offline: total - online,
+            chargingConnectors: charging,
+            activeConnectors: active_connectors,
+        };
     });
 
     app.get('/api/sessions', async (req) => {
