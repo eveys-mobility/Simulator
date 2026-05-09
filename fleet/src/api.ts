@@ -138,6 +138,20 @@ export function createFleetRouter(args: {
             max_power_kw: body.max_power_kw,
             ocpp_url: body.ocpp_url,
         });
+        // Live-forward the bits the worker accepts as Down messages.
+        // The worker applies them on the next charging-simulation tick
+        // (1 Hz), so a phase-mode flip mid-session shows up in the
+        // next MeterValues frame without a session restart.
+        // Display name / group_id / max_power_kw / ocpp_url need a
+        // restart to take effect — those are honoured on next spawn.
+        if (registry.get(cp_id)) {
+            if (body.phase_mode !== undefined) {
+                supervisor.send(cp_id, { type: 'set_phase_mode', mode: body.phase_mode });
+            }
+            if (body.dc_profile !== undefined) {
+                supervisor.send(cp_id, { type: 'set_dc_profile', profile: body.dc_profile });
+            }
+        }
         return res.json({ success: true, cp: updated });
     });
 
