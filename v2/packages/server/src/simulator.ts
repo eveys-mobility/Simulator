@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import {
     type ConnectorStatus,
+    DEFAULT_AC_WIRING,
     DEFAULT_DC_PROFILE,
     type Device,
     type MeterTick,
@@ -116,6 +117,22 @@ export class Simulator extends EventEmitter {
             if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
         }
         this.client.stop();
+    }
+
+    /**
+     * Apply a device-edit patch to the running Simulator without
+     * respawning the OCPP socket. Used for fields whose change can be
+     * picked up on the next tick (phaseMode, acWiring, dcProfile,
+     * displayName) — anything that requires a new BootNotification
+     * still goes through `DeviceManager.respawn`.
+     */
+    applyDeviceEdit(
+        patch: Partial<Pick<Device, 'displayName' | 'phaseMode' | 'acWiring' | 'dcProfile'>>,
+    ): void {
+        if (patch.displayName !== undefined) this.device.displayName = patch.displayName;
+        if (patch.phaseMode !== undefined) this.device.phaseMode = patch.phaseMode;
+        if (patch.acWiring !== undefined) this.device.acWiring = patch.acWiring;
+        if (patch.dcProfile !== undefined) this.device.dcProfile = patch.dcProfile;
     }
 
     snapshot(): {
@@ -636,28 +653,38 @@ export class Simulator extends EventEmitter {
 
         const nowMs = Date.now();
         const t = (nowMs - c.startedAtMs) / 1000;
-        // Drift is fractional seconds between integer-second ticks. The
-        // gauge holds the latest sample (good enough for "is the tick
-        // loop falling behind?" — a histogram would be overkill).
-        const lagSec = (t - Math.round(t)) > 0 ? (t - Math.floor(t)) : 0;
+        const lagSec = t - Math.round(t) > 0 ? t - Math.floor(t) : 0;
         if (Number.isFinite(lagSec)) simTickLagSeconds.set(lagSec);
+
         let powerW = 0;
         let socPct: number | undefined;
+        let measurands: sim.SampledValue[] = [];
+
         if (this.device.type === 'DC') {
             const profile = this.device.dcProfile ?? DEFAULT_DC_PROFILE;
-            const f = sim.computeDCFrame(profile, t, c.energyWh);
-            powerW = f.powerW;
-            socPct = f.socPct;
-            if (f.completed) {
+            const r = sim.computeDcMeasurands({ profile, elapsedSec: t, energyWh: c.energyWh });
+            powerW = r.frame.powerW;
+            socPct = r.frame.socPct;
+            measurands = r.measurands;
+            if (r.frame.completed) {
                 // Battery full → end session automatically.
                 this.stopSession(connectorId, 'Local').catch((e) => this.emit('error', e));
                 return;
             }
         } else {
+            const wiring = this.device.acWiring ?? DEFAULT_AC_WIRING;
+            // Pre-compute totals for the energy/peak accounting.
             const f = sim.computePhaseFrame(this.device.maxPowerKw, this.device.phaseMode);
             powerW = f.totalKw * 1000;
+            measurands = sim.computeAcMeasurands({
+                totalPowerKw: f.totalKw,
+                energyWh: c.energyWh + powerW / 3600, // include this tick's Wh in the published total
+                phaseMode: this.device.phaseMode,
+                wiring,
+            });
         }
-        // Energy = ∫ P dt; the tick is 1 s, so add P (W) * 1/3600 hours = Wh.
+
+        // Energy = ∫ P dt; tick is 1 s, so add P (W) × 1/3600 hours = Wh.
         c.energyWh += powerW / 3600;
         if (powerW > c.peakPowerW) c.peakPowerW = powerW;
 
@@ -670,10 +697,19 @@ export class Simulator extends EventEmitter {
         };
         this.emit('tick', tick);
 
-        // Push MeterValues to gateway every ~60s, fire-and-forget.
+        // MeterValues cadence comes from the OCPP config key — operators
+        // change it via ChangeConfiguration, and the change has to take
+        // effect without restarting the device. Default 60s per spec.
+        const cadence = this.config.getNumber('MeterValueSampleInterval') ?? 60;
+        if (cadence <= 0) return;
         const seconds = Math.floor(t);
-        if (seconds > 0 && seconds % 60 === 0) {
-            this.client.sendMeterValue(connectorId, c.transactionId, c.energyWh, powerW).catch((e) => this.emit('error', e));
-        }
+        if (seconds === 0 || seconds % cadence !== 0) return;
+
+        const csv = this.config.get('MeterValuesSampledData');
+        const filtered = sim.filterMeasurands(measurands, csv);
+        if (filtered.length === 0) return;
+        this.client
+            .sendMeterValueRich(connectorId, c.transactionId, filtered)
+            .catch((e) => this.emit('error', e));
     }
 }

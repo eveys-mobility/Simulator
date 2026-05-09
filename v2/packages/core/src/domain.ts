@@ -6,6 +6,31 @@ export type DeviceType = z.infer<typeof DeviceTypeSchema>;
 export const PhaseModeSchema = z.enum(['balanced', 'imbalanced', 'single-phase']);
 export type PhaseMode = z.infer<typeof PhaseModeSchema>;
 
+/**
+ * Physical AC wiring on the EVSE side. Independent of `phaseMode`,
+ * which is the *load* split policy used by the simulation.
+ *
+ *   phases          1 (L1+N) or 3 (L1+L2+L3+N)
+ *   nominalVoltageV phase-to-neutral voltage (default 230 V European)
+ *   lineToLineV     phase-to-phase voltage (≈ √3 × nominal, default 400 V)
+ *   reportLineToLine when true, MeterValues includes L1-L2/L2-L3/L3-L1
+ *                    Voltage entries in addition to L1/L2/L3 (L-N).
+ */
+export const AcWiringSchema = z.object({
+    phases: z.union([z.literal(1), z.literal(3)]).default(3),
+    nominalVoltageV: z.number().positive().default(230),
+    lineToLineV: z.number().positive().default(400),
+    reportLineToLine: z.boolean().default(false),
+});
+export type AcWiring = z.infer<typeof AcWiringSchema>;
+
+export const DEFAULT_AC_WIRING: AcWiring = {
+    phases: 3,
+    nominalVoltageV: 230,
+    lineToLineV: 400,
+    reportLineToLine: false,
+};
+
 export const DCBatteryProfileSchema = z.object({
     capacityKwh: z.number().positive(),
     chargerMaxKw: z.number().positive(),
@@ -33,6 +58,7 @@ export const DeviceSchema = z.object({
     maxPowerKw: z.number().positive(),
     ocppUrl: z.string().url(),
     phaseMode: PhaseModeSchema.default('balanced'),
+    acWiring: AcWiringSchema.optional(),
     dcProfile: DCBatteryProfileSchema.optional(),
     createdAt: z.string().datetime(),
 });
