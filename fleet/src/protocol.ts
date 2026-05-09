@@ -39,6 +39,8 @@ export type DownMessage =
     | { type: 'plug_in';        connector_id: number; id_tag: string }
     | { type: 'start_charging'; connector_id: number }
     | { type: 'stop_charging';  connector_id: number; reason?: string }
+    | { type: 'pause_charging'; connector_id: number }
+    | { type: 'resume_charging';connector_id: number }
     | { type: 'plug_out';       connector_id: number }
     | { type: 'emergency_stop'; connector_id: number }
     | { type: 'set_phase_mode'; mode: PhaseMode }
@@ -110,6 +112,8 @@ export function isDownMessage(value: unknown): value is DownMessage {
         'plug_in',
         'start_charging',
         'stop_charging',
+        'pause_charging',
+        'resume_charging',
         'plug_out',
         'emergency_stop',
         'set_phase_mode',

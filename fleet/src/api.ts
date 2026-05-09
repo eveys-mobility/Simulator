@@ -204,6 +204,22 @@ export function createFleetRouter(args: {
         sendOrFail(req.params.cp_id, { type: 'stop_charging', connector_id, reason }, res);
     });
 
+    router.post('/cps/:cp_id/actions/pause', (req: Request, res: Response) => {
+        const { connector_id } = req.body ?? {};
+        if (typeof connector_id !== 'number') {
+            return res.status(400).json({ success: false, error: 'connector_id (number) required' });
+        }
+        sendOrFail(req.params.cp_id, { type: 'pause_charging', connector_id }, res);
+    });
+
+    router.post('/cps/:cp_id/actions/resume', (req: Request, res: Response) => {
+        const { connector_id } = req.body ?? {};
+        if (typeof connector_id !== 'number') {
+            return res.status(400).json({ success: false, error: 'connector_id (number) required' });
+        }
+        sendOrFail(req.params.cp_id, { type: 'resume_charging', connector_id }, res);
+    });
+
     router.post('/cps/:cp_id/actions/plug-out', (req: Request, res: Response) => {
         const { connector_id } = req.body ?? {};
         if (typeof connector_id !== 'number') {

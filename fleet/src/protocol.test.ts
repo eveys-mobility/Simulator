@@ -10,6 +10,8 @@ describe('protocol — type guards', () => {
             { type: 'start_charging', connector_id: 1 },
             { type: 'stop_charging', connector_id: 1 },
             { type: 'stop_charging', connector_id: 1, reason: 'Local' },
+            { type: 'pause_charging', connector_id: 1 },
+            { type: 'resume_charging', connector_id: 1 },
             { type: 'plug_out', connector_id: 1 },
             { type: 'emergency_stop', connector_id: 1 },
             { type: 'set_phase_mode', mode: 'balanced' },

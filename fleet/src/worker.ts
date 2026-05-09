@@ -198,6 +198,28 @@ async function handleStop(msg: Extract<DownMessage, { type: 'stop_charging' }>):
     }
 }
 
+async function handlePause(msg: Extract<DownMessage, { type: 'pause_charging' }>): Promise<void> {
+    if (!transactionManager) return sendError('error', 'pause_charging before init');
+    try {
+        // pauseTransaction sends StatusNotification: SuspendedEV and
+        // halts the per-second charging-simulation loop. It does NOT
+        // emit a session_ended Up message — the session stays open;
+        // only the meter ticks pause. Resume reverses both.
+        await transactionManager.pauseTransaction(msg.connector_id);
+    } catch (err) {
+        sendError('error', `pause_charging failed: ${(err as Error).message}`);
+    }
+}
+
+async function handleResume(msg: Extract<DownMessage, { type: 'resume_charging' }>): Promise<void> {
+    if (!transactionManager) return sendError('error', 'resume_charging before init');
+    try {
+        await transactionManager.resumeTransaction(msg.connector_id);
+    } catch (err) {
+        sendError('error', `resume_charging failed: ${(err as Error).message}`);
+    }
+}
+
 async function handleEmergencyStop(msg: Extract<DownMessage, { type: 'emergency_stop' }>): Promise<void> {
     if (!transactionManager) return sendError('error', 'emergency_stop before init');
     try {
@@ -274,6 +296,12 @@ port.on('message', (raw: unknown) => {
             break;
         case 'stop_charging':
             void handleStop(msg);
+            break;
+        case 'pause_charging':
+            void handlePause(msg);
+            break;
+        case 'resume_charging':
+            void handleResume(msg);
             break;
         case 'plug_out':
             // No-op until MR-F's plug-state machine; the OCPP layer
