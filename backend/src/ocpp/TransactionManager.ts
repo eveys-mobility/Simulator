@@ -17,6 +17,7 @@ import { TransactionTracker } from './TransactionTracker';
 import { TransactionHistory } from './TransactionHistory';
 import { AuthorizationManager } from './AuthorizationManager';
 import { logger } from '../utils/logger';
+import { computePhaseFrame, parsePhaseMode, PhaseMode, PhaseFrame } from './PhaseModel';
 
 const COMPONENT = 'TransactionManager';
 
@@ -32,6 +33,15 @@ export class TransactionManager extends EventEmitter {
     private transactionTracker: TransactionTracker;
     private transactionHistory: TransactionHistory;
     private authorizationManager!: AuthorizationManager; // Set after construction
+    /** Per-connector phase mode. Defaults to `balanced` for any
+     *  connector that hasn't had a mode set yet. The map is the
+     *  source of truth at runtime; persistence is the
+     *  ConfigurationManager's job (see `phase_mode_C{n}` keys). */
+    private connectorPhaseMode: Map<number, PhaseMode> = new Map();
+    /** Last frame computed per connector — exposed via getLastPhaseFrame
+     *  so the API status endpoint and the UI can render a per-phase
+     *  readout without recomputing. */
+    private connectorLastPhaseFrame: Map<number, PhaseFrame> = new Map();
 
     constructor(chargePoint: ChargePoint, configManager: ConfigurationManager, chargePointId: string, maxPowerKw: number, meterValueIntervalSeconds: number = 60) {
         super();
@@ -70,6 +80,41 @@ export class TransactionManager extends EventEmitter {
     public setAuthorizationManager(authManager: AuthorizationManager): void {
         this.authorizationManager = authManager;
         console.log('[TransactionManager] Authorization manager set');
+    }
+
+    public getPhaseMode(connectorId: number): PhaseMode {
+        const stored = this.connectorPhaseMode.get(connectorId);
+        if (stored) return stored;
+        // Lazy-load from configuration; defaults to `balanced`.
+        const raw = this.configManager.getValue(`phase_mode_C${connectorId}`);
+        const { mode } = parsePhaseMode(raw);
+        this.connectorPhaseMode.set(connectorId, mode);
+        return mode;
+    }
+
+    public setPhaseMode(connectorId: number, raw: string): { mode: PhaseMode; warned: boolean } {
+        const { mode, warned } = parsePhaseMode(raw);
+        if (warned) {
+            console.warn(`[TransactionManager] phase_mode for connector ${connectorId} got unknown value "${raw}", falling back to "balanced"`);
+        }
+        const previous = this.getPhaseMode(connectorId);
+        this.connectorPhaseMode.set(connectorId, mode);
+        // Persist via the ConfigurationManager so a restart preserves
+        // the mode without needing an env variable. The key is custom
+        // (not in the spec's predefined set), so register-or-update via
+        // addCustomKey + a value mutation.
+        const key = `phase_mode_C${connectorId}`;
+        this.configManager.addCustomKey(key, mode, false);
+        this.configManager.changeConfiguration(key, mode);
+        if (previous !== mode) {
+            console.log(`[TransactionManager] phase_mode connector=${connectorId} ${previous} → ${mode}`);
+            this.emit('phaseModeChanged', { connectorId, from: previous, to: mode });
+        }
+        return { mode, warned };
+    }
+
+    public getLastPhaseFrame(connectorId: number): PhaseFrame | null {
+        return this.connectorLastPhaseFrame.get(connectorId) ?? null;
     }
 
     public async startTransaction(connectorId: number, idTag: string, isRemoteStart: boolean = false): Promise<ChargingSession> {
@@ -378,6 +423,17 @@ export class TransactionManager extends EventEmitter {
             session.currentMeterValue = newMeterValue;
             session.energyKwh = (newMeterValue - session.startMeterValue) / 1000; // Session energy
 
+            // Refresh the phase frame at 1 Hz so the UI per-phase
+            // readout stays live even between MeterValueSampleInterval
+            // ticks (which can be 60 s+).
+            const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
+            const phaseMode = this.getPhaseMode(connectorId);
+            const phaseFrame = computePhaseFrame(session.powerKw, phaseMode, {
+                single_phase_current_cap_a: currentLimitA,
+            });
+            this.connectorLastPhaseFrame.set(connectorId, phaseFrame);
+            session.phaseFrame = phaseFrame;
+
             this.emit('sessionUpdated', session);
         }, 1000);
 
@@ -454,39 +510,64 @@ export class TransactionManager extends EventEmitter {
             });
         }
 
-        if (measurands.includes('Power.Active.Import')) {
-            const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
-            const voltage = 400;
-            const maxPowerKw = (currentLimitA * voltage * Math.sqrt(3)) / 1000;
-            const actualPower = Math.min(session.powerKw, maxPowerKw);
+        // Per-phase emission. The PhaseModel turns the session's
+        // total power into a {l1,l2,l3} frame; we emit three rows
+        // per phase-aware measurand.
+        const currentLimitA = this.configManager.getValueAsNumber('CurrentLimiterValue', 32);
+        const phaseMode = this.getPhaseMode(connectorId);
+        const phaseFrame = computePhaseFrame(session.powerKw, phaseMode, {
+            single_phase_current_cap_a: currentLimitA,
+        });
+        this.connectorLastPhaseFrame.set(connectorId, phaseFrame);
 
-            sampledValue.push({
-                value: Math.round(actualPower * 1000).toString(),
-                context,
-                measurand: Measurand.PowerActiveImport,
-                unit: UnitOfMeasure.W
-            });
+        const phasePairs: Array<[Phase, typeof phaseFrame.l1]> = [
+            [Phase.L1, phaseFrame.l1],
+            [Phase.L2, phaseFrame.l2],
+            [Phase.L3, phaseFrame.l3],
+        ];
+
+        if (measurands.includes('Power.Active.Import')) {
+            for (const [phase, reading] of phasePairs) {
+                sampledValue.push({
+                    value: Math.round(reading.power_w).toString(),
+                    context,
+                    measurand: Measurand.PowerActiveImport,
+                    unit: UnitOfMeasure.W,
+                    phase,
+                });
+            }
         }
 
         if (measurands.includes('Current.Import')) {
-            const current = this.calculateCurrent(session.powerKw);
-            sampledValue.push({
-                value: current.toFixed(1),
-                context,
-                measurand: Measurand.CurrentImport,
-                unit: UnitOfMeasure.A,
-                phase: Phase.L1
-            });
+            for (const [phase, reading] of phasePairs) {
+                sampledValue.push({
+                    value: reading.current_a.toFixed(1),
+                    context,
+                    measurand: Measurand.CurrentImport,
+                    unit: UnitOfMeasure.A,
+                    phase,
+                });
+            }
         }
 
         if (measurands.includes('Voltage')) {
-            sampledValue.push({
-                value: '230',
-                context,
-                measurand: Measurand.Voltage,
-                unit: UnitOfMeasure.V,
-                phase: Phase.L1
-            });
+            // Voltage is reported phase-to-neutral (L1-N / L2-N / L3-N).
+            // Line-to-line reporting is a possible future toggle; see
+            // SPEC_THREE_PHASE_METERING.md open question 1.
+            const voltagePhases: Array<[Phase, typeof phaseFrame.l1]> = [
+                [Phase.L1N, phaseFrame.l1],
+                [Phase.L2N, phaseFrame.l2],
+                [Phase.L3N, phaseFrame.l3],
+            ];
+            for (const [phase, reading] of voltagePhases) {
+                sampledValue.push({
+                    value: Math.round(reading.voltage_v).toString(),
+                    context,
+                    measurand: Measurand.Voltage,
+                    unit: UnitOfMeasure.V,
+                    phase,
+                });
+            }
         }
 
         if (measurands.includes('Temperature')) {
@@ -549,12 +630,6 @@ export class TransactionManager extends EventEmitter {
                 }
             }
         }
-    }
-
-    private calculateCurrent(powerKw: number): number {
-        // For 3-phase 400V: I = P / (√3 * V)
-        // Simplified: I ≈ P / 0.69 (for 400V 3-phase)
-        return powerKw / 0.69;
     }
 
     public getSession(connectorId: number): ChargingSession | undefined {

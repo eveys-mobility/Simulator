@@ -6,7 +6,7 @@ import { TraceViewer, TraceEntry } from './components/TraceViewer';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import ConfigurationPanel from './components/ConfigurationPanel';
 import { ManualConsumption } from './components/ManualConsumption';
-import { api, ChargingSession, ConnectorState } from './services/api';
+import { api, ChargingSession, ConnectorState, PhaseMode } from './services/api';
 import { Wifi, WifiOff, Settings } from 'lucide-react';
 import './index.css';
 
@@ -274,6 +274,7 @@ function App() {
                                             connectorId={connector.id}
                                             hasActiveSession={!!sess}
                                             sessionStatus={sess?.status ?? null}
+                                            phaseMode={connector.phaseMode}
                                             onAction={showNotification}
                                         />
                                         <ManualConsumption

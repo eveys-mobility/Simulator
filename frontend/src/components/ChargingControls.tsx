@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Play, Square, Pause, PlayCircle } from 'lucide-react';
-import { api } from '../services/api';
+import { api, PhaseMode } from '../services/api';
+import { PhaseModeSelector } from './PhaseModeSelector';
 
 interface ChargingControlsProps {
     connectorId: number;
     hasActiveSession: boolean;
     sessionStatus: string | null;
+    phaseMode?: PhaseMode;
     onAction: (action: string) => void;
 }
 
@@ -13,6 +15,7 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
     connectorId,
     hasActiveSession,
     sessionStatus,
+    phaseMode,
     onAction
 }) => {
     const [idTag, setIdTag] = useState('TEST-TAG-001');
@@ -111,6 +114,13 @@ export const ChargingControls: React.FC<ChargingControlsProps> = ({
                         </>
                     )}
                 </div>
+
+                <PhaseModeSelector
+                    connectorId={1}
+                    currentMode={phaseMode}
+                    onChange={(mode) => onAction(`Phase mode → ${mode}`)}
+                    onError={(message) => onAction(`Error: ${message}`)}
+                />
             </div>
         </div>
     );

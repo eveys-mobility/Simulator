@@ -1,6 +1,21 @@
 const API_BASE_URL = '/api';
 const WS_URL = 'ws://localhost:3001/ws';
 
+export type PhaseMode = 'balanced' | 'imbalanced' | 'single-phase';
+
+export interface PhaseReading {
+    voltage_v: number;
+    current_a: number;
+    power_w: number;
+}
+
+export interface PhaseFrame {
+    l1: PhaseReading;
+    l2: PhaseReading;
+    l3: PhaseReading;
+    total_p_kw: number;
+}
+
 export interface ChargingSession {
     connectorId: number;
     transactionId?: number;
@@ -10,12 +25,14 @@ export interface ChargingSession {
     energyKwh: number;
     duration: number;
     startTime: string;
+    phaseFrame?: PhaseFrame | null;
 }
 
 export interface ConnectorState {
     id: number;
     status: string;
     hasActiveSession: boolean;
+    phaseMode?: PhaseMode;
 }
 
 export interface Status {
@@ -204,6 +221,15 @@ class ApiService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params),
+        });
+        return response.json();
+    }
+
+    async setPhaseMode(connectorId: number, mode: PhaseMode): Promise<any> {
+        const response = await fetch(`${API_BASE_URL}/connectors/${connectorId}/phase-mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode })
         });
         return response.json();
     }
