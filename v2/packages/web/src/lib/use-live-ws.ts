@@ -18,6 +18,7 @@ export function useLiveWs() {
     const applyTick = useLiveStore((s) => s.applyTick);
     const appendFrame = useLiveStore((s) => s.appendFrame);
     const setBenchmarkProgress = useLiveStore((s) => s.setBenchmarkProgress);
+    const evictMissing = useLiveStore((s) => s.evictMissing);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -52,6 +53,14 @@ export function useLiveWs() {
                     case 'hello': {
                         // Server's snapshot — let TanStack Query cache it.
                         qc.setQueryData(['devices'], msg.devices);
+                        // Prune live-store entries for devices that no
+                        // longer exist on the server (delete-while-offline,
+                        // bulk-cleanup, server reset). Without this the
+                        // online/connectorStatus Maps grow unbounded.
+                        const arr = msg.devices as Array<{ id: string }> | undefined;
+                        if (Array.isArray(arr)) {
+                            evictMissing(new Set(arr.map((d) => d.id)));
+                        }
                         break;
                     }
                     case 'state': {
