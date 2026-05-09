@@ -19,6 +19,7 @@ export function useLiveWs() {
     const appendFrame = useLiveStore((s) => s.appendFrame);
     const setBenchmarkProgress = useLiveStore((s) => s.setBenchmarkProgress);
     const evictMissing = useLiveStore((s) => s.evictMissing);
+    const recordCoalescedDrop = useLiveStore((s) => s.recordCoalescedDrop);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -96,9 +97,14 @@ export function useLiveWs() {
                     case 'frames-coalesced': {
                         // Server-side hint that the broadcast hub
                         // dropped repetitive MeterValues/Heartbeat
-                        // frames inside the flush window. The trace
-                        // viewer doesn't try to be lossless under load
-                        // — there's nothing to do here.
+                        // frames inside the flush window. We never
+                        // try to reconstruct the dropped frames; we
+                        // just count them so the trace viewer can
+                        // show "throttled" when the load goes up.
+                        const m = msg as { dropped?: number };
+                        if (typeof m.dropped === 'number' && m.dropped > 0) {
+                            recordCoalescedDrop(m.dropped);
+                        }
                         break;
                     }
                     case 'frame': {
@@ -142,5 +148,5 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, qc]);
+    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, qc]);
 }
