@@ -3,21 +3,16 @@ import type { ConformanceCase } from '../runner.js';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * OCPP 1.6 RemoteTrigger profile. Two of the six TriggerMessage
- * variants (Heartbeat, StatusNotification) are already covered by
- * the Core suite — they're the ones a CSMS leans on most. The
- * cases here cover the remaining four:
+ * OCPP 1.6 RemoteTrigger profile. Heartbeat and StatusNotification
+ * triggers live in the Core suite (they're the ones a CSMS leans on
+ * most). Diagnostics and Firmware status triggers live in the
+ * FirmwareManagement suite now that the profile is implemented.
+ * Remaining cases here:
  *
  *   - MeterValues during a session
  *   - BootNotification re-emit
- *   - DiagnosticsStatusNotification (this simulator returns
- *     NotImplemented — firmware/diagnostics aren't modelled)
- *   - FirmwareStatusNotification (same)
- *
- * NotImplemented is a *valid* OCPP §6.34 response when the CP
- * doesn't support the requested message. The case asserts the
- * status comes back correctly, which is what a CSMS conformance
- * suite cares about.
+ *   - Unknown requestedMessage → NotImplemented (the spec-correct
+ *     response per §6.34)
  */
 export const REMOTE_TRIGGER_CASES: ConformanceCase[] = [
     {
@@ -80,33 +75,10 @@ export const REMOTE_TRIGGER_CASES: ConformanceCase[] = [
         },
     },
 
-    {
-        id: 'trigger.diagnostics-status-notification-not-implemented',
-        title: 'TriggerMessage DiagnosticsStatusNotification → NotImplemented',
-        profile: 'RemoteTrigger',
-        run: async ({ handle }) => {
-            await handle.waitForBoot();
-            const r = await handle.triggerMessage('DiagnosticsStatusNotification');
-            if (r.status !== 'NotImplemented') {
-                throw new Error(
-                    `expected NotImplemented (FirmwareManagement profile not modelled), got ${r.status}`,
-                );
-            }
-        },
-    },
-
-    {
-        id: 'trigger.firmware-status-notification-not-implemented',
-        title: 'TriggerMessage FirmwareStatusNotification → NotImplemented',
-        profile: 'RemoteTrigger',
-        run: async ({ handle }) => {
-            await handle.waitForBoot();
-            const r = await handle.triggerMessage('FirmwareStatusNotification');
-            if (r.status !== 'NotImplemented') {
-                throw new Error(`expected NotImplemented, got ${r.status}`);
-            }
-        },
-    },
+    // DiagnosticsStatusNotification and FirmwareStatusNotification
+    // triggers used to land here as NotImplemented when those profiles
+    // weren't modelled. They moved to cases/firmware-management.ts as
+    // positive Accepted cases now that the simulator implements them.
 
     {
         id: 'trigger.unknown-message-not-implemented',

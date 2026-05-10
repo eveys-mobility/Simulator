@@ -150,12 +150,21 @@ describe('Simulator — CSMS call handling', () => {
         sim.stop();
     });
 
-    it('TriggerMessage Accepted for known type, NotImplemented otherwise', async () => {
+    it('TriggerMessage Accepted for known type, NotImplemented for unknown', async () => {
         const { sim } = newSim();
         const a = await sim.handleCsmsCall('TriggerMessage', { requestedMessage: 'Heartbeat' });
         expect(a.ok && (a.result as { status: string }).status).toBe('Accepted');
-        const b = await sim.handleCsmsCall('TriggerMessage', { requestedMessage: 'FirmwareStatusNotification' });
-        expect(b.ok && (b.result as { status: string }).status).toBe('NotImplemented');
+        // FirmwareStatusNotification used to land here as NotImplemented;
+        // it's now Accepted because the FirmwareManagement profile is
+        // wired in. An actually-unknown trigger still falls through.
+        const b = await sim.handleCsmsCall('TriggerMessage', {
+            requestedMessage: 'FirmwareStatusNotification',
+        });
+        expect(b.ok && (b.result as { status: string }).status).toBe('Accepted');
+        const c = await sim.handleCsmsCall('TriggerMessage', {
+            requestedMessage: 'TotallyMadeUpMessage',
+        });
+        expect(c.ok && (c.result as { status: string }).status).toBe('NotImplemented');
         sim.stop();
     });
 

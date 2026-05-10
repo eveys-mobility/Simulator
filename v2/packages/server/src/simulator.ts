@@ -9,13 +9,17 @@ import {
     DEFAULT_AC_WIRING,
     DEFAULT_DC_PROFILE,
     type Device,
+    type DiagnosticsStatus,
+    type FirmwareStatus,
     GetCompositeScheduleReqSchema,
+    GetDiagnosticsReqSchema,
     type MeterTick,
     type Reservation,
     ReserveNowReqSchema,
     type ReserveNowStatus,
     SendLocalListReqSchema,
     SetChargingProfileReqSchema,
+    UpdateFirmwareReqSchema,
     type UpdateStatus,
     composeSchedule,
     resolveActiveLimit,
@@ -105,6 +109,22 @@ export class Simulator extends EventEmitter {
      *  ourselves (RemoteStartTransaction), we need someone to persist
      *  the row first. The store is injected so we can do that inline. */
     private store: Store;
+    /** Firmware state walked by UpdateFirmware: the latest status the
+     *  simulator emitted on FirmwareStatusNotification. Idle is the
+     *  resting state; the rest are transient and announce progress. */
+    private firmwareStatus: FirmwareStatus = 'Idle';
+    /** Diagnostics upload state walked by GetDiagnostics. Same shape. */
+    private diagnosticsStatus: DiagnosticsStatus = 'Idle';
+    /** Live state-machine timers; cleared on stop() to avoid leaking
+     *  setTimeouts across despawns. */
+    private firmwareTimers: NodeJS.Timeout[] = [];
+    private diagnosticsTimers: NodeJS.Timeout[] = [];
+    /** Set in stop() so any timer that already had its handler queued
+     *  before clearInterval/clearTimeout ran can short-circuit. Without
+     *  this, a tick fired after stop() reaches into a closed Store and
+     *  crashes — visible under the conformance suite where cases run
+     *  back-to-back. */
+    private stopped = false;
 
     constructor(public readonly device: Device, store: Store, clientOptions: OcppClientOptions = {}) {
         super();
@@ -162,11 +182,14 @@ export class Simulator extends EventEmitter {
     }
 
     stop(): void {
+        this.stopped = true;
         for (const c of this.connectors.values()) {
             if (c.tickTimer) clearInterval(c.tickTimer);
             if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
             if (c.reservationExpiryTimer) clearTimeout(c.reservationExpiryTimer);
         }
+        this.clearFirmwareTimers();
+        this.clearDiagnosticsTimers();
         this.client.stop();
     }
 
@@ -591,6 +614,14 @@ export class Simulator extends EventEmitter {
                     result: { listVersion: this.store.getLocalListVersion(this.device.id) },
                 };
 
+            case 'UpdateFirmware':
+                this.handleUpdateFirmware(p);
+                // OCPP §6.19: UpdateFirmware response carries no fields.
+                return { ok: true, result: {} };
+
+            case 'GetDiagnostics':
+                return { ok: true, result: this.handleGetDiagnostics(p) };
+
             case 'SetChargingProfile':
                 return { ok: true, result: { status: this.handleSetChargingProfile(p) } };
 
@@ -888,6 +919,81 @@ export class Simulator extends EventEmitter {
     }
 
     /**
+     * OCPP §6.19 UpdateFirmware. The CSMS request is fire-and-forget
+     * — its CALLRESULT carries no fields. The CP's progress shows up
+     * as a series of FirmwareStatusNotification CALLs going the other
+     * way: Downloading → Downloaded → Installing → Installed.
+     *
+     * The simulator never actually fetches firmware — the state walk
+     * runs on short timers so a CSMS conformance suite can verify the
+     * sequence in well under a second. Step durations are deliberately
+     * tiny (50ms each) so a benchmark run isn't held up by a stray
+     * UpdateFirmware request.
+     */
+    private handleUpdateFirmware(p: Record<string, unknown>): void {
+        const parsed = UpdateFirmwareReqSchema.safeParse(p);
+        if (!parsed.success) return; // §6.19: no error path on the response — log and bail
+        // Cancel any in-flight walk so a re-trigger replaces it.
+        this.clearFirmwareTimers();
+        const stages: FirmwareStatus[] = ['Downloading', 'Downloaded', 'Installing', 'Installed'];
+        const stepMs = 50;
+        for (let i = 0; i < stages.length; i++) {
+            this.firmwareTimers.push(
+                setTimeout(() => {
+                    const status = stages[i];
+                    if (!status) return;
+                    this.firmwareStatus = status;
+                    this.client
+                        .call('FirmwareStatusNotification', { status })
+                        .catch(() => undefined);
+                }, (i + 1) * stepMs),
+            );
+        }
+    }
+
+    private clearFirmwareTimers(): void {
+        for (const t of this.firmwareTimers) clearTimeout(t);
+        this.firmwareTimers = [];
+    }
+
+    /**
+     * OCPP §6.7 GetDiagnostics. Returns a synthetic filename in the
+     * CALLRESULT and walks the upload state on its own (Uploading →
+     * Uploaded), same shape as UpdateFirmware. The synthetic name lets
+     * a CSMS verify the response payload without needing to inspect a
+     * real upload.
+     */
+    private handleGetDiagnostics(p: Record<string, unknown>): { fileName: string } {
+        const parsed = GetDiagnosticsReqSchema.safeParse(p);
+        // Even with bad params we return a filename — the OCPP message
+        // has no error status. Validation just gates the state walk.
+        const fileName = `diagnostics-${this.device.id}-${Date.now()}.tar.gz`;
+        if (!parsed.success) return { fileName };
+
+        this.clearDiagnosticsTimers();
+        const stages: DiagnosticsStatus[] = ['Uploading', 'Uploaded'];
+        const stepMs = 50;
+        for (let i = 0; i < stages.length; i++) {
+            this.diagnosticsTimers.push(
+                setTimeout(() => {
+                    const status = stages[i];
+                    if (!status) return;
+                    this.diagnosticsStatus = status;
+                    this.client
+                        .call('DiagnosticsStatusNotification', { status })
+                        .catch(() => undefined);
+                }, (i + 1) * stepMs),
+            );
+        }
+        return { fileName };
+    }
+
+    private clearDiagnosticsTimers(): void {
+        for (const t of this.diagnosticsTimers) clearTimeout(t);
+        this.diagnosticsTimers = [];
+    }
+
+    /**
      * OCPP §6.18 ReserveNow. Picks the first connector that's free and
      * not already reserved when connectorId=0; otherwise targets the
      * specific connector. Stores the reservation, flips status to
@@ -1042,16 +1148,24 @@ export class Simulator extends EventEmitter {
                 return 'Accepted';
             }
             case 'DiagnosticsStatusNotification':
+                this.client
+                    .call('DiagnosticsStatusNotification', { status: this.diagnosticsStatus })
+                    .catch(() => undefined);
+                return 'Accepted';
             case 'FirmwareStatusNotification':
-                // We don't model firmware/diagnostics yet — politely
-                // decline rather than lie with Accepted.
-                return 'NotImplemented';
+                this.client
+                    .call('FirmwareStatusNotification', { status: this.firmwareStatus })
+                    .catch(() => undefined);
+                return 'Accepted';
             default:
                 return 'NotImplemented';
         }
     }
 
     private tick(connectorId: number): void {
+        // Tick may have been queued before clearInterval ran in stop().
+        // Bail before reaching into the (possibly closed) Store.
+        if (this.stopped) return;
         const c = this.requireConnector(connectorId);
         if (!c.transactionId) return;
 
