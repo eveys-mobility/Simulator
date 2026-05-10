@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, Lock, RotateCw, Search, Settings2 } from 'lucide-react';
+import { AlertTriangle, Check, Lock, RotateCw, Save, Search, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,14 +26,14 @@ type WriteStatus = 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired';
 /**
  * OCPP configuration table for one device. Mirrors what a CSMS sees
  * over GetConfiguration / ChangeConfiguration. Each row is a key:
- *   - readonly keys render as plain text with a lock badge
- *   - bool keys get a true/false dropdown
- *   - int keys get a number input
- *   - csl/string keys get a free text input
+ *  - readonly keys render as plain text with a lock badge
+ *  - bool keys get a true/false dropdown
+ *  - int keys get a number input
+ *  - csl/string keys get a free text input
  *
- * Save fires a PUT and shows the wire status (Accepted, Rejected,
- * NotSupported, RebootRequired) as an inline badge that fades after
- * a few seconds.
+ * The card hoists draft + status state so a "Save all" header button
+ * can flush every dirty row in one round trip — useful during CSMS
+ * conformance work where flipping 4–6 keys back-to-back is normal.
  */
 export function OcppConfigCard({ deviceId }: Props) {
     const qc = useQueryClient();
@@ -42,7 +42,49 @@ export function OcppConfigCard({ deviceId }: Props) {
         queryFn: () => api.getDeviceConfig(deviceId),
     });
     const [filter, setFilter] = useState('');
+    /** Per-key draft. Only present when the row is dirty (draft !== server value). */
+    const [drafts, setDrafts] = useState<Map<string, string>>(() => new Map());
+    /** Per-key last-write status. Pruned when the row goes clean again. */
+    const [statuses, setStatuses] = useState<Map<string, WriteStatus>>(() => new Map());
+
     const keys = data?.keys ?? [];
+
+    // When the server data changes (refetch / WS-triggered invalidation),
+    // drop any drafts whose value now matches the server — the row went
+    // clean from under us. Keeps the dirty count honest.
+    useEffect(() => {
+        setDrafts((prev) => {
+            const next = new Map(prev);
+            let changed = false;
+            for (const k of keys) {
+                if (next.get(k.key) === k.value) {
+                    next.delete(k.key);
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+    }, [keys]);
+
+    // Fade Accepted / RebootRequired statuses after a few seconds; keep
+    // Rejected and NotSupported until the user retries.
+    useEffect(() => {
+        if (statuses.size === 0) return;
+        const id = setTimeout(() => {
+            setStatuses((prev) => {
+                const next = new Map(prev);
+                let changed = false;
+                for (const [k, s] of prev) {
+                    if (s === 'Accepted' || s === 'RebootRequired') {
+                        next.delete(k);
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
+        }, 4000);
+        return () => clearTimeout(id);
+    }, [statuses]);
 
     const filtered = useMemo(() => {
         const q = filter.trim().toLowerCase();
@@ -55,6 +97,86 @@ export function OcppConfigCard({ deviceId }: Props) {
         );
     }, [keys, filter]);
 
+    const setDraft = (key: string, value: string, serverValue: string) => {
+        setDrafts((prev) => {
+            const next = new Map(prev);
+            if (value === serverValue) next.delete(key);
+            else next.set(key, value);
+            return next;
+        });
+        // Clear an old per-row status the moment the user resumes typing.
+        setStatuses((prev) => {
+            if (!prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.delete(key);
+            return next;
+        });
+    };
+
+    const resetDraft = (key: string) => {
+        setDrafts((prev) => {
+            if (!prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.delete(key);
+            return next;
+        });
+        setStatuses((prev) => {
+            if (!prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.delete(key);
+            return next;
+        });
+    };
+
+    const recordResults = (
+        results: Array<{ key: string; status: WriteStatus; value: string }>,
+        serverValueFor: (key: string) => string | undefined,
+    ) => {
+        setStatuses((prev) => {
+            const next = new Map(prev);
+            for (const r of results) next.set(r.key, r.status);
+            return next;
+        });
+        // Clear drafts for keys the server now stores at the draft value
+        // (Accepted / RebootRequired). Rejected/NotSupported leave the
+        // draft in place so the user can fix and retry.
+        setDrafts((prev) => {
+            const next = new Map(prev);
+            for (const r of results) {
+                const sv = serverValueFor(r.key);
+                if (r.status === 'Accepted' || r.status === 'RebootRequired') {
+                    if (next.get(r.key) === r.value || next.get(r.key) === sv) next.delete(r.key);
+                }
+            }
+            return next;
+        });
+    };
+
+    const saveOne = useMutation({
+        mutationFn: ({ key, value }: { key: string; value: string }) =>
+            api.setDeviceConfig(deviceId, key, value),
+        onSuccess: (res) => {
+            recordResults([res], (k) => keys.find((x) => x.key === k)?.value);
+            qc.invalidateQueries({ queryKey: ['device-config', deviceId] });
+        },
+    });
+
+    const saveAll = useMutation({
+        mutationFn: (changes: Record<string, string>) => api.setDeviceConfigBulk(deviceId, changes),
+        onSuccess: (res) => {
+            recordResults(res.results, (k) => keys.find((x) => x.key === k)?.value);
+            qc.invalidateQueries({ queryKey: ['device-config', deviceId] });
+        },
+    });
+
+    const dirtyCount = drafts.size;
+    const handleSaveAll = () => {
+        if (dirtyCount === 0) return;
+        const changes: Record<string, string> = {};
+        for (const [k, v] of drafts) changes[k] = v;
+        saveAll.mutate(changes);
+    };
+
     return (
         <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0 pb-3 gap-2 flex-wrap">
@@ -64,6 +186,14 @@ export function OcppConfigCard({ deviceId }: Props) {
                         {filtered.length}
                         {filter && filtered.length !== keys.length && ` of ${keys.length}`}
                     </span>
+                    {dirtyCount > 0 && (
+                        <Badge
+                            variant="outline"
+                            className="text-[10px] gap-1 bg-amber-500/15 text-amber-600 border-amber-500/30"
+                        >
+                            {dirtyCount} unsaved
+                        </Badge>
+                    )}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                     <div className="relative">
@@ -80,8 +210,17 @@ export function OcppConfigCard({ deviceId }: Props) {
                         variant="outline"
                         onClick={() => qc.invalidateQueries({ queryKey: ['device-config', deviceId] })}
                         title="Refresh"
+                        disabled={saveAll.isPending}
                     >
                         <RotateCw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        size="sm"
+                        onClick={handleSaveAll}
+                        disabled={dirtyCount === 0 || saveAll.isPending || saveOne.isPending}
+                    >
+                        <Save className="h-3.5 w-3.5" />
+                        {saveAll.isPending ? 'Saving…' : `Save all${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
                     </Button>
                 </div>
             </CardHeader>
@@ -96,9 +235,23 @@ export function OcppConfigCard({ deviceId }: Props) {
                     </div>
                 ) : (
                     <ul className="divide-y divide-border/50 border-t">
-                        {filtered.map((k) => (
-                            <ConfigRow key={k.key} deviceId={deviceId} entry={k} />
-                        ))}
+                        {filtered.map((k) => {
+                            const draft = drafts.get(k.key);
+                            const status = statuses.get(k.key) ?? null;
+                            return (
+                                <ConfigRow
+                                    key={k.key}
+                                    entry={k}
+                                    draft={draft ?? k.value}
+                                    dirty={draft !== undefined}
+                                    status={status}
+                                    onChange={(v) => setDraft(k.key, v, k.value)}
+                                    onReset={() => resetDraft(k.key)}
+                                    onSave={() => saveOne.mutate({ key: k.key, value: draft ?? k.value })}
+                                    saving={saveOne.isPending || saveAll.isPending}
+                                />
+                            );
+                        })}
                     </ul>
                 )}
             </CardContent>
@@ -106,41 +259,18 @@ export function OcppConfigCard({ deviceId }: Props) {
     );
 }
 
-function ConfigRow({ deviceId, entry }: { deviceId: string; entry: ConfigKey }) {
-    const qc = useQueryClient();
-    const [draft, setDraft] = useState(entry.value);
-    const [status, setStatus] = useState<WriteStatus | null>(null);
+interface RowProps {
+    entry: ConfigKey;
+    draft: string;
+    dirty: boolean;
+    status: WriteStatus | null;
+    onChange: (v: string) => void;
+    onReset: () => void;
+    onSave: () => void;
+    saving: boolean;
+}
 
-    // Reset draft + clear status when the underlying value changes
-    // (e.g. another tab edited it, or refresh).
-    useEffect(() => {
-        setDraft(entry.value);
-        setStatus(null);
-    }, [entry.value]);
-
-    // Auto-clear the status badge after a few seconds so the row
-    // doesn't stay green / yellow forever.
-    useEffect(() => {
-        if (!status || status === 'Rejected' || status === 'NotSupported') return;
-        const id = setTimeout(() => setStatus(null), 4000);
-        return () => clearTimeout(id);
-    }, [status]);
-
-    const save = useMutation({
-        mutationFn: (value: string) => api.setDeviceConfig(deviceId, entry.key, value),
-        onSuccess: (res) => {
-            setStatus(res.status);
-            // Refetch so the row reflects whatever the backend stored
-            // (Rejected leaves the value untouched, but querying back
-            // keeps the cache honest if multiple tabs edited at once).
-            qc.invalidateQueries({ queryKey: ['device-config', deviceId] });
-        },
-    });
-
-    const dirty = draft !== entry.value;
-    const handleSave = () => save.mutate(draft);
-    const handleReset = () => setDraft(entry.value);
-
+function ConfigRow({ entry, draft, dirty, status, onChange, onReset, onSave, saving }: RowProps) {
     return (
         <li className="px-3 py-2 flex items-start gap-3">
             <div className="min-w-0 flex-1">
@@ -182,7 +312,7 @@ function ConfigRow({ deviceId, entry }: { deviceId: string; entry: ConfigKey }) 
                         {entry.value || <em className="text-muted-foreground/60">(empty)</em>}
                     </span>
                 ) : (
-                    <ConfigInput entry={entry} value={draft} onChange={setDraft} />
+                    <ConfigInput entry={entry} value={draft} onChange={onChange} />
                 )}
             </div>
             {!entry.readonly && (
@@ -190,14 +320,14 @@ function ConfigRow({ deviceId, entry }: { deviceId: string; entry: ConfigKey }) 
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={handleReset}
-                        disabled={!dirty || save.isPending}
+                        onClick={onReset}
+                        disabled={!dirty || saving}
                         title="Discard changes"
                     >
                         Reset
                     </Button>
-                    <Button size="sm" onClick={handleSave} disabled={!dirty || save.isPending}>
-                        {save.isPending ? 'Saving…' : 'Save'}
+                    <Button size="sm" onClick={onSave} disabled={!dirty || saving}>
+                        {saving ? 'Saving…' : 'Save'}
                     </Button>
                 </div>
             )}
@@ -270,4 +400,3 @@ function StatusBadge({ status }: { status: WriteStatus }) {
         <Badge variant="outline" className="text-[10px] bg-secondary/40">NotSupported</Badge>
     );
 }
-

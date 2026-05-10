@@ -372,6 +372,34 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         },
     );
 
+    /** Bulk config write — { changes: { key: value, ... } }. Each key
+     *  is applied independently; partial failures don't abort the
+     *  batch. Returns one row per requested key with the same wire
+     *  status the per-key endpoint would have produced. UI uses this
+     *  for "Save all dirty rows" so an operator flipping 5 keys hits
+     *  one round trip instead of five. */
+    const PutBulkConfigBody = z.object({
+        changes: z.record(z.string(), z.string()),
+    });
+    app.put<{ Params: { id: string }; Body: { changes: Record<string, string> } }>(
+        '/api/devices/:id/config',
+        async (req, reply) => {
+            const body = PutBulkConfigBody.safeParse(req.body);
+            if (!body.success) return reply.code(400).send({ error: body.error.message });
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            const entries = Object.entries(body.data.changes);
+            const results = entries.map(([key, value]) => {
+                const status = sim.setOcppConfig(key, value);
+                const after = sim
+                    .getOcppConfig([key])
+                    .configurationKey.find((k) => k.key === key);
+                return { key, status, value: after?.value ?? value };
+            });
+            return { results };
+        },
+    );
+
     // ---- DELETED DEVICES (admin) ----
     //
     // Soft-delete leaves rows in the table with deleted_at set so the
