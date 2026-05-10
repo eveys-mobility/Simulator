@@ -227,6 +227,8 @@ export const api = {
                 status: 'passed' | 'failed';
                 error: string | null;
                 durationMs: number;
+                unimplemented: boolean;
+                unimplementedReason: string | null;
             }>;
         }>('POST', '/conformance/run'),
 };

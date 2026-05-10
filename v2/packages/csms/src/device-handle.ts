@@ -34,6 +34,15 @@ export class DeviceHandle {
         return this.state.deviceId;
     }
 
+    /** Send any CSMS-initiated CALL with a custom action. Resolves
+     *  with the CALLRESULT payload, rejects with `Error("CODE: desc")`
+     *  on CALLERROR. Useful for conformance cases that exercise
+     *  actions outside the typed helpers below — e.g. asserting
+     *  unimplemented features return NotImplemented. */
+    rawCall<T = unknown>(action: string, payload: unknown = {}): Promise<T> {
+        return this.callDevice(action, payload) as Promise<T>;
+    }
+
     /** HTTP upgrade headers from the WS handshake. Useful for asserting
      *  on Authorization / User-Agent / etc. Lower-cased keys (Node convention). */
     get upgradeHeaders(): Record<string, string | string[] | undefined> {

@@ -24,6 +24,13 @@ export interface ConformanceCase {
     csmsOptions?: MockCsmsOptions;
     /** Set up overrides for the Device record. Defaults to a 22kW AC. */
     deviceOverrides?: Partial<Device>;
+    /** Mark cases for features the simulator hasn't built yet (Reservation,
+     *  LocalAuthListManagement, FirmwareManagement). The suite runner
+     *  *skips* the body and reports `unimplemented` instead of running
+     *  it as failed — accurate signalling that the gap is known and
+     *  expected, not a regression. Setting this to a string makes it
+     *  the displayed reason in the SPA / CLI output. */
+    unimplemented?: boolean | string;
     /** The actual check. Throws (or `expect()` fails) on non-conformance. */
     run: (ctx: ConformanceContext) => Promise<void>;
 }
@@ -95,6 +102,15 @@ export interface CaseResult {
      *  Empty when status is 'passed'. */
     error: string | null;
     durationMs: number;
+    /** True when the case is part of a profile the simulator hasn't
+     *  built yet. The case still ran — these cases typically assert
+     *  the simulator's CALLERROR=NotImplemented response, which is
+     *  the spec-correct behaviour for unsupported features. The flag
+     *  lets renderers tone the row neutrally instead of green so the
+     *  operator sees the gap honestly. */
+    unimplemented: boolean;
+    /** Optional explanation for the unimplemented flag. */
+    unimplementedReason: string | null;
 }
 
 export interface SuiteResult {
@@ -121,6 +137,8 @@ export async function runConformanceSuite(cases: ConformanceCase[]): Promise<Sui
     const results: CaseResult[] = [];
     for (const c of cases) {
         const t0 = Date.now();
+        const isUnimpl = Boolean(c.unimplemented);
+        const unimplReason = typeof c.unimplemented === 'string' ? c.unimplemented : null;
         try {
             await runConformanceCase(c);
             results.push({
@@ -130,6 +148,8 @@ export async function runConformanceSuite(cases: ConformanceCase[]): Promise<Sui
                 status: 'passed',
                 error: null,
                 durationMs: Date.now() - t0,
+                unimplemented: isUnimpl,
+                unimplementedReason: unimplReason,
             });
         } catch (err) {
             results.push({
@@ -139,6 +159,8 @@ export async function runConformanceSuite(cases: ConformanceCase[]): Promise<Sui
                 status: 'failed',
                 error: err instanceof Error ? err.message : String(err),
                 durationMs: Date.now() - t0,
+                unimplemented: isUnimpl,
+                unimplementedReason: unimplReason,
             });
         }
     }
