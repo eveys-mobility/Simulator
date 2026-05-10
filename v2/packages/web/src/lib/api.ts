@@ -143,6 +143,14 @@ export const api = {
             key: string;
             value: string;
         }>('PUT', `/devices/${deviceId}/config/${encodeURIComponent(key)}`, { value }),
+    setDeviceConfigBulk: (deviceId: string, changes: Record<string, string>) =>
+        http<{
+            results: Array<{
+                key: string;
+                status: 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired';
+                value: string;
+            }>;
+        }>('PUT', `/devices/${deviceId}/config`, { changes }),
 
     listBenchmarkPresets: () =>
         http<Array<{ key: string; label: string; scenario: import('@ocpp-sim/core').Scenario }>>(
