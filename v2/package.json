@@ -15,6 +15,7 @@
         "dev:web": "npm --workspace @ocpp-sim/web run dev",
         "build": "npm --workspaces run build --if-present",
         "test": "npm --workspaces run test --if-present",
+        "conformance": "npm --workspace @ocpp-sim/conformance run test",
         "lint": "biome check .",
         "format": "biome format --write ."
     },

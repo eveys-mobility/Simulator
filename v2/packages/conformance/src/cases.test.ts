@@ -4,6 +4,7 @@ import {
     CORE_CASES,
     FIRMWARE_MANAGEMENT_CASES,
     LOCAL_AUTH_LIST_CASES,
+    NEGATIVE_CASES,
     REMOTE_TRIGGER_CASES,
     RESERVATION_CASES,
     SMART_CHARGING_CASES,
@@ -69,6 +70,14 @@ describe('OCPP 1.6 FirmwareManagement conformance', () => {
     }
 });
 
+describe('OCPP 1.6 negative / failure-injection', () => {
+    for (const c of NEGATIVE_CASES) {
+        it(`${c.id} — ${c.title}`, async () => {
+            await runConformanceCase(c);
+        });
+    }
+});
+
 describe('ALL_CASES integrity', () => {
     it('contains every per-profile array exactly once with unique ids', () => {
         const expected =
@@ -77,7 +86,8 @@ describe('ALL_CASES integrity', () => {
             REMOTE_TRIGGER_CASES.length +
             RESERVATION_CASES.length +
             LOCAL_AUTH_LIST_CASES.length +
-            FIRMWARE_MANAGEMENT_CASES.length;
+            FIRMWARE_MANAGEMENT_CASES.length +
+            NEGATIVE_CASES.length;
         if (ALL_CASES.length !== expected) {
             throw new Error(
                 `ALL_CASES has ${ALL_CASES.length} entries; profile arrays sum to ${expected}`,
