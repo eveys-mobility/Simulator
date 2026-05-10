@@ -83,6 +83,73 @@ async function withTimeout<T>(p: Promise<T>, ms: number, id: string): Promise<T>
     ]);
 }
 
+/** Per-case result row for `runConformanceSuite`. Plain JSON. */
+export interface CaseResult {
+    id: string;
+    title: string;
+    profile: ConformanceCase['profile'];
+    /** 'passed' if the case body resolved without throwing within its
+     *  timeout, 'failed' otherwise. */
+    status: 'passed' | 'failed';
+    /** Stringified error from the case body or the timeout watchdog.
+     *  Empty when status is 'passed'. */
+    error: string | null;
+    durationMs: number;
+}
+
+export interface SuiteResult {
+    passed: number;
+    failed: number;
+    durationMs: number;
+    cases: CaseResult[];
+}
+
+/**
+ * Run a list of conformance cases and return a JSON-shaped report.
+ * Unlike `runConformanceCase`, this never throws — failures land in
+ * `cases[].error` so callers (REST endpoints, SPA renderers, CI
+ * gates) get a single uniform shape regardless of which case blew
+ * up.
+ *
+ * Cases run sequentially. Each spins up its own port-0 CSMS + memory
+ * Store internally, so they're isolated even though we don't
+ * parallelise — running in series keeps the CSMS port pool small
+ * and the log output ordered.
+ */
+export async function runConformanceSuite(cases: ConformanceCase[]): Promise<SuiteResult> {
+    const started = Date.now();
+    const results: CaseResult[] = [];
+    for (const c of cases) {
+        const t0 = Date.now();
+        try {
+            await runConformanceCase(c);
+            results.push({
+                id: c.id,
+                title: c.title,
+                profile: c.profile,
+                status: 'passed',
+                error: null,
+                durationMs: Date.now() - t0,
+            });
+        } catch (err) {
+            results.push({
+                id: c.id,
+                title: c.title,
+                profile: c.profile,
+                status: 'failed',
+                error: err instanceof Error ? err.message : String(err),
+                durationMs: Date.now() - t0,
+            });
+        }
+    }
+    return {
+        passed: results.filter((r) => r.status === 'passed').length,
+        failed: results.filter((r) => r.status === 'failed').length,
+        durationMs: Date.now() - started,
+        cases: results,
+    };
+}
+
 function buildDevice(input: Partial<Device> & { id: string; ocppUrl: string }): Device {
     return {
         id: input.id,

@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Cpu, Layers, LogOut, Settings, Zap } from 'lucide-react';
+import { Activity, BarChart3, ClipboardCheck, Cpu, Layers, LogOut, Settings, Zap } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { useApplyTheme } from '@/lib/theme';
 import { useLiveWs } from '@/lib/use-live-ws';
 import { BenchmarkPage } from '@/pages/BenchmarkPage';
 import { BenchmarkRunDetailPage } from '@/pages/BenchmarkRunDetailPage';
+import { ConformancePage } from '@/pages/ConformancePage';
 import { DeviceDetailPage } from '@/pages/DeviceDetailPage';
 import { DevicesPage } from '@/pages/DevicesPage';
 import { FleetPage } from '@/pages/FleetPage';
@@ -63,6 +64,9 @@ function AuthedApp({ onLogout }: { onLogout: (() => void) | null }) {
                             <NavItem to="/sessions">
                                 <Activity className="h-4 w-4" /> Sessions
                             </NavItem>
+                            <NavItem to="/conformance">
+                                <ClipboardCheck className="h-4 w-4" /> Conformance
+                            </NavItem>
                             <NavItem to="/settings">
                                 <Settings className="h-4 w-4" /> Settings
                             </NavItem>
@@ -91,6 +95,7 @@ function AuthedApp({ onLogout }: { onLogout: (() => void) | null }) {
                     <Route path="/benchmark" element={<BenchmarkPage />} />
                     <Route path="/benchmark/runs/:id" element={<BenchmarkRunDetailPage />} />
                     <Route path="/sessions" element={<SessionsPage />} />
+                    <Route path="/conformance" element={<ConformancePage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                 </Routes>
             </main>
