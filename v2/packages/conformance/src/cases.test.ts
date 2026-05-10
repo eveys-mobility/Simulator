@@ -2,6 +2,7 @@ import { describe, it } from 'vitest';
 import {
     ALL_CASES,
     CONCURRENT_TX_CASES,
+    CONNECTION_TIMEOUT_CASES,
     CORE_CASES,
     FIRMWARE_MANAGEMENT_CASES,
     LOCAL_AUTH_LIST_CASES,
@@ -33,6 +34,14 @@ describe('OCPP 1.6 Core conformance', () => {
 
 describe('OCPP 1.6 ConcurrentTx (§5.5)', () => {
     for (const c of CONCURRENT_TX_CASES) {
+        it(`${c.id} — ${c.title}`, async () => {
+            await runConformanceCase(c);
+        });
+    }
+});
+
+describe('OCPP 1.6 ConnectionTimeOut (§9.1.5)', () => {
+    for (const c of CONNECTION_TIMEOUT_CASES) {
         it(`${c.id} — ${c.title}`, async () => {
             await runConformanceCase(c);
         });
@@ -92,6 +101,7 @@ describe('ALL_CASES integrity', () => {
         const expected =
             CORE_CASES.length +
             CONCURRENT_TX_CASES.length +
+            CONNECTION_TIMEOUT_CASES.length +
             SMART_CHARGING_CASES.length +
             REMOTE_TRIGGER_CASES.length +
             RESERVATION_CASES.length +
