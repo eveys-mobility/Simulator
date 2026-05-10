@@ -421,19 +421,23 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         return withRuntime(restored, manager);
     });
 
-    const PurgeBody = z.object({ confirm: z.literal('PURGE') });
-    app.delete<{ Params: { id: string } }>('/api/devices/:id/purge', async (req, reply) => {
-        // Purge cascades through sessions / config / profiles. Refuse
-        // unless the caller passes the confirmation literal — same
-        // pattern Settings reset uses for the database-wide nuke.
-        const body = PurgeBody.safeParse(req.body);
-        if (!body.success) {
-            return reply.code(400).send({ error: 'purge requires { confirm: "PURGE" } body' });
-        }
-        const purged = store.purgeDevice(req.params.id);
-        if (!purged) return reply.code(404).send({ error: 'not found or not deleted' });
-        return reply.code(204).send();
-    });
+    app.delete<{ Params: { id: string }; Querystring: { confirm?: string } }>(
+        '/api/devices/:id/purge',
+        async (req, reply) => {
+            // Purge cascades through sessions / config / profiles. Refuse
+            // unless the caller passes ?confirm=PURGE — query param,
+            // not body, because DELETE-with-body is a quirky habit some
+            // proxies and HTTP clients strip silently. Settings reset
+            // uses a body confirm because it's a POST; this one fits
+            // the verb better as a query string.
+            if (req.query.confirm !== 'PURGE') {
+                return reply.code(400).send({ error: 'purge requires ?confirm=PURGE' });
+            }
+            const purged = store.purgeDevice(req.params.id);
+            if (!purged) return reply.code(404).send({ error: 'not found or not deleted' });
+            return reply.code(204).send();
+        },
+    );
 
     // ---- SESSIONS ----
 
