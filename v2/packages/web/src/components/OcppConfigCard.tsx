@@ -46,6 +46,15 @@ export function OcppConfigCard({ deviceId }: Props) {
     const [drafts, setDrafts] = useState<Map<string, string>>(() => new Map());
     /** Per-key last-write status. Pruned when the row goes clean again. */
     const [statuses, setStatuses] = useState<Map<string, WriteStatus>>(() => new Map());
+    /** Result summary from the most recent Save-all. Populated only by
+     *  bulk save (per-row Save reuses the row badge). Fades after 5s. */
+    const [lastBulkSummary, setLastBulkSummary] = useState<{
+        accepted: number;
+        rejected: number;
+        rebootRequired: number;
+        notSupported: number;
+        at: number;
+    } | null>(null);
 
     const keys = data?.keys ?? [];
 
@@ -166,8 +175,28 @@ export function OcppConfigCard({ deviceId }: Props) {
         onSuccess: (res) => {
             recordResults(res.results, (k) => keys.find((x) => x.key === k)?.value);
             qc.invalidateQueries({ queryKey: ['device-config', deviceId] });
+            // Tally per-status counts for the header pill.
+            let accepted = 0;
+            let rejected = 0;
+            let rebootRequired = 0;
+            let notSupported = 0;
+            for (const r of res.results) {
+                if (r.status === 'Accepted') accepted += 1;
+                else if (r.status === 'Rejected') rejected += 1;
+                else if (r.status === 'RebootRequired') rebootRequired += 1;
+                else if (r.status === 'NotSupported') notSupported += 1;
+            }
+            setLastBulkSummary({ accepted, rejected, rebootRequired, notSupported, at: Date.now() });
         },
     });
+
+    // Fade the bulk summary pill after 5s. Using lastBulkSummary.at as
+    // the dep so each new save resets the timer.
+    useEffect(() => {
+        if (!lastBulkSummary) return;
+        const id = setTimeout(() => setLastBulkSummary(null), 5000);
+        return () => clearTimeout(id);
+    }, [lastBulkSummary]);
 
     const dirtyCount = drafts.size;
     const handleSaveAll = () => {
@@ -194,6 +223,7 @@ export function OcppConfigCard({ deviceId }: Props) {
                             {dirtyCount} unsaved
                         </Badge>
                     )}
+                    {lastBulkSummary && <BulkSummaryBadge summary={lastBulkSummary} />}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                     <div className="relative">
@@ -373,6 +403,37 @@ function ConfigInput({
             className="h-8 w-full font-mono text-xs"
             placeholder={entry.type === 'csl' ? 'comma,separated,list' : ''}
         />
+    );
+}
+
+function BulkSummaryBadge({
+    summary,
+}: {
+    summary: { accepted: number; rejected: number; rebootRequired: number; notSupported: number };
+}) {
+    const failed = summary.rejected + summary.notSupported;
+    const ok = summary.accepted + summary.rebootRequired;
+    // Tone the badge by the worst outcome in the batch — green when
+    // everything was Accepted, amber when at least one needs a reboot,
+    // red when anything was Rejected/NotSupported. Operator gets the
+    // "did this work?" answer in one glance.
+    const tone =
+        failed > 0
+            ? 'bg-destructive/15 text-destructive border-destructive/30'
+            : summary.rebootRequired > 0
+              ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+              : 'bg-brand-green/15 text-brand-green border-brand-green/30';
+    const Icon = failed > 0 ? AlertTriangle : summary.rebootRequired > 0 ? AlertTriangle : Check;
+    const parts: string[] = [];
+    if (ok > 0) parts.push(`${ok} saved`);
+    if (summary.rejected > 0) parts.push(`${summary.rejected} rejected`);
+    if (summary.notSupported > 0) parts.push(`${summary.notSupported} not supported`);
+    if (summary.rebootRequired > 0) parts.push(`${summary.rebootRequired} need reboot`);
+    return (
+        <Badge variant="outline" className={`text-[10px] gap-1 ${tone}`}>
+            <Icon className="h-2.5 w-2.5" />
+            {parts.join(' · ')}
+        </Badge>
     );
 }
 
