@@ -51,4 +51,37 @@ describe('runConformanceSuite', () => {
         expect(r.cases[0]?.title).toBe('always passes');
         expect(r.cases[0]?.profile).toBe('Core');
     });
+
+    it('unimplemented flag flows through to the result row', async () => {
+        // The case still runs — `unimplemented` is metadata about the
+        // *simulator*, not a runner skip. The body here passes, so the
+        // row reports passed + unimplemented:true together. Renderers
+        // tone these neutrally so a CSMS team sees the gap honestly.
+        const r = await runConformanceSuite([
+            {
+                id: 'fake.unimpl',
+                title: 'unimplemented but passes',
+                profile: 'Reservation',
+                unimplemented: 'feature not built yet',
+                run: async () => undefined,
+            },
+        ]);
+        expect(r.cases[0]?.status).toBe('passed');
+        expect(r.cases[0]?.unimplemented).toBe(true);
+        expect(r.cases[0]?.unimplementedReason).toBe('feature not built yet');
+    });
+
+    it('unimplemented:true (boolean) carries through with null reason', async () => {
+        const r = await runConformanceSuite([
+            {
+                id: 'fake.unimpl-bool',
+                title: 'no reason',
+                profile: 'FirmwareManagement',
+                unimplemented: true,
+                run: async () => undefined,
+            },
+        ]);
+        expect(r.cases[0]?.unimplemented).toBe(true);
+        expect(r.cases[0]?.unimplementedReason).toBeNull();
+    });
 });

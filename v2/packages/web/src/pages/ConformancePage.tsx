@@ -13,6 +13,12 @@ interface CaseRow {
     status?: 'passed' | 'failed';
     error?: string | null;
     durationMs?: number;
+    /** Marks cases for features the simulator hasn't built. The body
+     *  still ran (typically asserting CALLERROR=NotImplemented per
+     *  §1.4); the flag tells the renderer to tone the row neutrally
+     *  even when it passed, so the operator sees the gap honestly. */
+    unimplemented?: boolean;
+    unimplementedReason?: string | null;
 }
 
 /**
@@ -29,21 +35,44 @@ export function ConformancePage() {
         queryKey: ['conformance-cases'],
         queryFn: api.listConformanceCases,
     });
-    const [results, setResults] = useState<Map<string, { status: 'passed' | 'failed'; error: string | null; durationMs: number }>>(
-        () => new Map(),
-    );
-    const [summary, setSummary] = useState<{ passed: number; failed: number; durationMs: number } | null>(null);
+    interface RunRow {
+        status: 'passed' | 'failed';
+        error: string | null;
+        durationMs: number;
+        unimplemented: boolean;
+        unimplementedReason: string | null;
+    }
+    const [results, setResults] = useState<Map<string, RunRow>>(() => new Map());
+    const [summary, setSummary] = useState<{
+        passed: number;
+        failed: number;
+        unimplemented: number;
+        durationMs: number;
+    } | null>(null);
     const [openErrorId, setOpenErrorId] = useState<string | null>(null);
 
     const run = useMutation({
         mutationFn: api.runConformance,
         onSuccess: (res) => {
-            const m = new Map<string, { status: 'passed' | 'failed'; error: string | null; durationMs: number }>();
+            const m = new Map<string, RunRow>();
+            let unimpl = 0;
             for (const c of res.cases) {
-                m.set(c.id, { status: c.status, error: c.error, durationMs: c.durationMs });
+                m.set(c.id, {
+                    status: c.status,
+                    error: c.error,
+                    durationMs: c.durationMs,
+                    unimplemented: c.unimplemented,
+                    unimplementedReason: c.unimplementedReason,
+                });
+                if (c.unimplemented) unimpl += 1;
             }
             setResults(m);
-            setSummary({ passed: res.passed, failed: res.failed, durationMs: res.durationMs });
+            setSummary({
+                passed: res.passed,
+                failed: res.failed,
+                unimplemented: unimpl,
+                durationMs: res.durationMs,
+            });
         },
     });
 
@@ -54,7 +83,14 @@ export function ConformancePage() {
         return list.map((c) => {
             const r = results.get(c.id);
             return r
-                ? { ...c, status: r.status, error: r.error, durationMs: r.durationMs }
+                ? {
+                      ...c,
+                      status: r.status,
+                      error: r.error,
+                      durationMs: r.durationMs,
+                      unimplemented: r.unimplemented,
+                      unimplementedReason: r.unimplementedReason,
+                  }
                 : { ...c };
         });
     }, [cases, results]);
@@ -138,15 +174,25 @@ export function ConformancePage() {
     );
 }
 
-function SummaryPill({ summary }: { summary: { passed: number; failed: number; durationMs: number } }) {
+function SummaryPill({
+    summary,
+}: {
+    summary: { passed: number; failed: number; unimplemented: number; durationMs: number };
+}) {
     const tone =
         summary.failed === 0
             ? 'bg-brand-green/15 text-brand-green border-brand-green/30'
             : 'bg-destructive/15 text-destructive border-destructive/30';
+    const total = summary.passed + summary.failed;
     return (
         <Badge variant="outline" className={`text-xs gap-1.5 ${tone}`}>
             {summary.failed === 0 ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-            {summary.passed}/{summary.passed + summary.failed} passed
+            {summary.passed}/{total} passed
+            {summary.unimplemented > 0 && (
+                <span className="text-muted-foreground/80 ml-1">
+                    · {summary.unimplemented} unimplemented
+                </span>
+            )}
             <span className="text-muted-foreground/80 ml-1">·</span>
             <span className="tabular-nums">{(summary.durationMs / 1000).toFixed(1)}s</span>
         </Badge>
@@ -158,13 +204,16 @@ function ProfileSummary({ list }: { list: CaseRow[] }) {
     if (ran.length === 0) return null;
     const passed = ran.filter((r) => r.status === 'passed').length;
     const failed = ran.length - passed;
-    const tone =
-        failed === 0
-            ? 'bg-brand-green/15 text-brand-green border-brand-green/30'
-            : 'bg-destructive/15 text-destructive border-destructive/30';
+    const allUnimpl = ran.length > 0 && ran.every((r) => r.unimplemented);
+    const tone = failed > 0
+        ? 'bg-destructive/15 text-destructive border-destructive/30'
+        : allUnimpl
+          ? 'bg-secondary/40 text-muted-foreground border-border/60'
+          : 'bg-brand-green/15 text-brand-green border-brand-green/30';
     return (
         <Badge variant="outline" className={`text-[10px] gap-1 ${tone}`}>
             {passed}/{ran.length}
+            {allUnimpl && <span className="ml-0.5">· not built</span>}
         </Badge>
     );
 }
@@ -180,10 +229,11 @@ function CaseRowView({
     onToggleError: () => void;
     running: boolean;
 }) {
+    const isExpectedGap = row.status === 'passed' && row.unimplemented;
     return (
         <li>
             <div className="px-3 py-2 flex items-start gap-3">
-                <StatusIcon status={row.status} running={running} />
+                <StatusIcon status={row.status} running={running} unimplemented={isExpectedGap} />
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs text-muted-foreground truncate">{row.id}</span>
@@ -191,6 +241,15 @@ function CaseRowView({
                             <span className="text-[10px] text-muted-foreground/70 tabular-nums">
                                 {row.durationMs}ms
                             </span>
+                        )}
+                        {isExpectedGap && (
+                            <Badge
+                                variant="outline"
+                                className="text-[10px] gap-1 bg-secondary/40 border-border/60 text-muted-foreground"
+                                title={row.unimplementedReason ?? 'Feature not built; the simulator answers NotImplemented per spec'}
+                            >
+                                not built
+                            </Badge>
                         )}
                     </div>
                     <p className="text-sm">{row.title}</p>
@@ -210,7 +269,25 @@ function CaseRowView({
     );
 }
 
-function StatusIcon({ status, running }: { status?: 'passed' | 'failed'; running: boolean }) {
+function StatusIcon({
+    status,
+    running,
+    unimplemented,
+}: {
+    status?: 'passed' | 'failed';
+    running: boolean;
+    unimplemented?: boolean;
+}) {
+    if (status === 'passed' && unimplemented) {
+        // Pass-but-unimplemented = the simulator correctly returned
+        // NotImplemented for an unbuilt feature. Tone neutrally — green
+        // would lie about the gap, red would lie about the wire shape.
+        return (
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-secondary/40 text-muted-foreground">
+                <Check className="h-3 w-3" />
+            </span>
+        );
+    }
     if (status === 'passed') {
         return (
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-green/20 text-brand-green">
