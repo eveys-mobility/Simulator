@@ -111,7 +111,7 @@ describe('deleted-devices admin endpoints', () => {
         expect(r.status).toBe(404);
     });
 
-    it('DELETE .../purge requires { confirm: "PURGE" } and cascades sessions', async () => {
+    it('DELETE .../purge requires ?confirm=PURGE and cascades sessions', async () => {
         const { app, base, manager, store } = await setup();
         cleanup = async () => {
             await manager.stopAll();
@@ -139,20 +139,16 @@ describe('deleted-devices admin endpoints', () => {
         });
         await fetch(`${base}/api/devices/${created.id}`, { method: 'DELETE' });
 
-        // Wrong / missing body → 400, no purge.
-        const noBody = await fetch(`${base}/api/devices/${created.id}/purge`, { method: 'DELETE' });
-        expect(noBody.status).toBe(400);
-        const wrongBody = await fetch(`${base}/api/devices/${created.id}/purge`, {
+        // Missing / wrong query → 400, no purge.
+        const noConfirm = await fetch(`${base}/api/devices/${created.id}/purge`, { method: 'DELETE' });
+        expect(noConfirm.status).toBe(400);
+        const wrongConfirm = await fetch(`${base}/api/devices/${created.id}/purge?confirm=YES`, {
             method: 'DELETE',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ confirm: 'YES' }),
         });
-        expect(wrongBody.status).toBe(400);
+        expect(wrongConfirm.status).toBe(400);
 
-        const purge = await fetch(`${base}/api/devices/${created.id}/purge`, {
+        const purge = await fetch(`${base}/api/devices/${created.id}/purge?confirm=PURGE`, {
             method: 'DELETE',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ confirm: 'PURGE' }),
         });
         expect(purge.status).toBe(204);
 
@@ -176,10 +172,8 @@ describe('deleted-devices admin endpoints', () => {
             body: JSON.stringify({ type: 'AC' }),
         }).then((r) => r.json() as Promise<{ id: string }>);
         // Skip the soft-delete step on purpose.
-        const r = await fetch(`${base}/api/devices/${created.id}/purge`, {
+        const r = await fetch(`${base}/api/devices/${created.id}/purge?confirm=PURGE`, {
             method: 'DELETE',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ confirm: 'PURGE' }),
         });
         expect(r.status).toBe(404);
         // Device still alive.
