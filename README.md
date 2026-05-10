@@ -50,19 +50,33 @@ Click a run in the History tab to open `/benchmark/runs/:id` — a detail page w
 
 ## Conformance
 
-`@ocpp-sim/conformance` ships a declarative OCPP 1.6 Core profile test suite — each case spins up a fresh `MockCsms` + `Simulator` pair, exercises one OCPP scenario (BootNotification payload, Status sequence end-to-end, GetConfiguration enumeration, Authorize gating on RemoteStart, ChangeAvailability, Reset Soft/Hard, UnlockConnector, DataTransfer, TriggerMessage, …), and asserts spec-correct behaviour.
+`@ocpp-sim/conformance` ships a declarative OCPP 1.6 test suite covering **all six profiles** — each case spins up a fresh `MockCsms` + `Simulator` pair, exercises one OCPP scenario, and asserts spec-correct behaviour.
+
+| Profile | Cases | Examples |
+|---|---|---|
+| Core | 20 | BootNotification payload; Status sequence; GetConfiguration; Authorize gating; ChangeAvailability; Reset Soft/Hard; UnlockConnector; DataTransfer; TriggerMessage |
+| SmartCharging | 7 | SetChargingProfile install/clear; GetCompositeSchedule round-trip; ChargePointMaxProfile cap clamps live MeterValues |
+| RemoteTrigger | 3 | MeterValues + BootNotification re-emit; unknown trigger → NotImplemented |
+| Reservation | 7 | ReserveNow → Reserved; Occupied/Unavailable paths; CancelReservation; idTag binding |
+| LocalAuthListManagement | 8 | SendLocalList Full + Differential; VersionMismatch; LocalPreAuthorize routes around CSMS |
+| FirmwareManagement | 4 | UpdateFirmware Downloading→Installed walk; GetDiagnostics filename; trigger arms |
 
 ```sh
 cd v2
 npm --workspace @ocpp-sim/conformance run test
+# or, from the workspace root:
+npm run conformance
 ```
 
-20 cases pass against the simulator today. The cases are plain data (`CORE_CASES` in `packages/conformance/src/cases/core.ts`) so a future SPA page can render pass/fail without going through Vitest, and `runConformanceCase()` is exposed for ad-hoc use:
+The CI script exits non-zero on any failure, ready to drop into a CSMS team's pipeline. Cases are plain data so a future SPA-side runner reads the same arrays:
 
 ```ts
-import { CORE_CASES, runConformanceCase } from '@ocpp-sim/conformance';
-for (const c of CORE_CASES) await runConformanceCase(c);
+import { ALL_CASES, runConformanceSuite } from '@ocpp-sim/conformance';
+const result = await runConformanceSuite(ALL_CASES);
+console.log(`${result.passed}/${result.cases.length} passed`);
 ```
+
+The SPA exposes the same suite at **/conformance** with a Run button, per-profile sections, and per-case error pre-blocks on failure.
 
 ## Deploy
 
