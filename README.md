@@ -2,7 +2,7 @@
 
 A device-first OCPP 1.6J charge-point simulator. Multi-device, lightweight, type-safe end-to-end.
 
-The codebase lives under [`v2/`](./v2) as a five-package npm workspace:
+A five-package npm workspace:
 
 - `@ocpp-sim/core` — pure TS: zod-validated wire codecs, domain types, AC phase + DC SoC simulation models.
 - `@ocpp-sim/server` — Fastify + ws + better-sqlite3. One device, one OCPP client, one tick loop.
@@ -13,7 +13,6 @@ The codebase lives under [`v2/`](./v2) as a five-package npm workspace:
 ## Quick start
 
 ```sh
-cd v2
 npm install
 OCPP_URL=ws://localhost:19000 npm run dev:server &
 npm run dev:web
@@ -24,7 +23,6 @@ Server: <http://localhost:3001> · Web: <http://localhost:5173>
 ## Tests
 
 ```sh
-cd v2
 npm test
 ```
 
@@ -33,7 +31,6 @@ npm test
 The server exposes `/metrics` in Prometheus text format. Bring up Prometheus + Grafana with the prebuilt dashboard:
 
 ```sh
-cd v2
 docker compose up -d
 ```
 
@@ -62,9 +59,8 @@ Click a run in the History tab to open `/benchmark/runs/:id` — a detail page w
 | FirmwareManagement | 4 | UpdateFirmware Downloading→Installed walk; GetDiagnostics filename; trigger arms |
 
 ```sh
-cd v2
 npm --workspace @ocpp-sim/conformance run test
-# or, from the workspace root:
+# or, the CI alias:
 npm run conformance
 ```
 
@@ -80,10 +76,9 @@ The SPA exposes the same suite at **/conformance** with a Run button, per-profil
 
 ## Deploy
 
-A multi-stage `Dockerfile` at `v2/Dockerfile` produces one image that runs the server **and** serves the built web bundle on a single port.
+A multi-stage `Dockerfile` at the repo root produces one image that runs the server **and** serves the built web bundle on a single port.
 
 ```sh
-cd v2
 docker build -t ocpp-sim .
 docker run --rm -d -p 3001:3001 \
     -v ocpp-sim-data:/data \
