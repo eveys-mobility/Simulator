@@ -142,11 +142,50 @@ export class Store {
     deleteDevice(id: string): boolean {
         // Soft delete. Sessions and config rows have FK ON DELETE CASCADE,
         // which would wipe the audit trail if we hard-deleted; the
-        // soft path keeps history intact and is reversible if we ever
-        // add an "undelete" UI.
+        // soft path keeps history intact and is reversible — see
+        // restoreDevice / purgeDevice.
         const r = this.db
             .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
             .run(new Date().toISOString(), id);
+        return r.changes > 0;
+    }
+
+    /**
+     * Soft-deleted rows that operators can still see (and restore /
+     * permanently purge) from the Settings page. Ordered by deletion
+     * time, newest first — that's what an operator hunting for "the
+     * one I just deleted" wants.
+     */
+    listDeletedDevices(): (Device & { deletedAt: string })[] {
+        const rows = this.db
+            .prepare(`SELECT * FROM devices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`)
+            .all() as DeviceRow[];
+        return rows.map((r) => ({
+            ...rowToDevice(r),
+            // Non-null asserted: WHERE clause guarantees deleted_at is set.
+            deletedAt: r.deleted_at as string,
+        }));
+    }
+
+    /** Reverses deleteDevice. Returns the device row if it existed and
+     *  was deleted, null otherwise. The caller is responsible for
+     *  re-spawning the simulator. */
+    restoreDevice(id: string): Device | null {
+        const r = this.db
+            .prepare(`UPDATE devices SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
+            .run(id);
+        if (r.changes === 0) return null;
+        return this.getDevice(id);
+    }
+
+    /** Hard-delete: drops the device row, which cascades through every
+     *  FK (sessions, device_config, charging_profiles). Use only after
+     *  the operator has explicitly confirmed they want to lose history.
+     *  No-op if the device isn't in the soft-deleted state. */
+    purgeDevice(id: string): boolean {
+        const r = this.db
+            .prepare(`DELETE FROM devices WHERE id = ? AND deleted_at IS NOT NULL`)
+            .run(id);
         return r.changes > 0;
     }
 

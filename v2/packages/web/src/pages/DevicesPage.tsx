@@ -78,6 +78,9 @@ export function DevicesPage() {
         mutationFn: api.deleteDevice,
         onSuccess: (_data, deviceId) => {
             qc.invalidateQueries({ queryKey: ['devices'] });
+            // The Settings → Deleted devices list must reflect the new
+            // soft-deleted row when the user navigates there.
+            qc.invalidateQueries({ queryKey: ['deleted-devices'] });
             resetLiveDevice(deviceId);
             setPendingDelete(null);
         },
