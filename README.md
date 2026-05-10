@@ -2,11 +2,13 @@
 
 A device-first OCPP 1.6J charge-point simulator. Multi-device, lightweight, type-safe end-to-end.
 
-The codebase lives under [`v2/`](./v2) as a three-package npm workspace:
+The codebase lives under [`v2/`](./v2) as a five-package npm workspace:
 
 - `@ocpp-sim/core` — pure TS: zod-validated wire codecs, domain types, AC phase + DC SoC simulation models.
 - `@ocpp-sim/server` — Fastify + ws + better-sqlite3. One device, one OCPP client, one tick loop.
 - `@ocpp-sim/web` — Vite + React + Tailwind + shadcn-style UI + TanStack Query + zustand.
+- `@ocpp-sim/csms` — programmable mock CSMS used by tests (and by the conformance runner).
+- `@ocpp-sim/conformance` — declarative OCPP 1.6 conformance cases that run a real Simulator against a MockCsms and assert spec-correct behaviour.
 
 ## Quick start
 
@@ -45,6 +47,22 @@ The simulator runs on the host (`npm run dev:server`); only Prometheus and Grafa
 The `/benchmark` page in the web UI runs configurable load scenarios (presets: Smoke, Steady, Step ramp, plus a fully custom form) against the configured OCPP gateway. While a run is going, live counters stream over the WebSocket; on completion, the run is persisted in SQLite.
 
 Click a run in the History tab to open `/benchmark/runs/:id` — a detail page with the scenario summary plus six Grafana panels (CALL rate, p99 latency, errors/sec, frame throughput, active sessions, online devices) **embedded as iframes scoped to the run's time window**. Bring the Compose stack up first; Grafana is configured for embedding via `GF_SECURITY_ALLOW_EMBEDDING=true`.
+
+## Conformance
+
+`@ocpp-sim/conformance` ships a declarative OCPP 1.6 Core profile test suite — each case spins up a fresh `MockCsms` + `Simulator` pair, exercises one OCPP scenario (BootNotification payload, Status sequence end-to-end, GetConfiguration enumeration, Authorize gating on RemoteStart, ChangeAvailability, Reset Soft/Hard, UnlockConnector, DataTransfer, TriggerMessage, …), and asserts spec-correct behaviour.
+
+```sh
+cd v2
+npm --workspace @ocpp-sim/conformance run test
+```
+
+20 cases pass against the simulator today. The cases are plain data (`CORE_CASES` in `packages/conformance/src/cases/core.ts`) so a future SPA page can render pass/fail without going through Vitest, and `runConformanceCase()` is exposed for ad-hoc use:
+
+```ts
+import { CORE_CASES, runConformanceCase } from '@ocpp-sim/conformance';
+for (const c of CORE_CASES) await runConformanceCase(c);
+```
 
 ## Deploy
 

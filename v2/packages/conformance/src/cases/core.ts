@@ -257,4 +257,190 @@ export const CORE_CASES: ConformanceCase[] = [
             }
         },
     },
+
+    {
+        id: 'core.availability.inoperative-makes-connector-unavailable',
+        title: 'ChangeAvailability Inoperative flips connector to Unavailable; Operative restores Available',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            await handle.waitForStatus('Available', 1);
+
+            const inop = await handle.changeAvailability(1, 'Inoperative');
+            if (inop.status !== 'Accepted') {
+                throw new Error(`Inoperative expected Accepted, got ${inop.status}`);
+            }
+            await handle.waitForStatus('Unavailable', 1);
+
+            const op = await handle.changeAvailability(1, 'Operative');
+            if (op.status !== 'Accepted') {
+                throw new Error(`Operative expected Accepted, got ${op.status}`);
+            }
+            await handle.waitForStatus('Available', 1);
+        },
+    },
+
+    {
+        id: 'core.availability.scheduled-when-charging',
+        title: 'ChangeAvailability returns Scheduled when a session is active',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            await handle.waitForStatus('Available', 1);
+            await handle.changeConfiguration('MeterValueSampleInterval', '60');
+
+            await handle.remoteStart({ connectorId: 1, idTag: 'CONFORM' });
+            await handle.waitForStatus('Charging', 1);
+
+            // OCPP §6.7: when a transaction is in progress the CP must
+            // defer the availability change and reply Scheduled — the
+            // status only flips after the session ends.
+            const r = await handle.changeAvailability(1, 'Inoperative');
+            if (r.status !== 'Scheduled') {
+                throw new Error(`expected Scheduled while charging, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.reset.soft-accepted',
+        title: 'Reset Soft is Accepted by the CP',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            const r = await handle.reset('Soft');
+            if (r.status !== 'Accepted') {
+                throw new Error(`Reset Soft expected Accepted, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.reset.hard-stops-active-session',
+        title: 'Reset Hard ends an active transaction with a HardReset reason',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            await handle.waitForStatus('Available', 1);
+            await handle.changeConfiguration('MeterValueSampleInterval', '60');
+
+            await handle.remoteStart({ connectorId: 1, idTag: 'CONFORM' });
+            await handle.waitForStatus('Charging', 1);
+
+            const r = await handle.reset('Hard');
+            if (r.status !== 'Accepted') {
+                throw new Error(`Reset Hard expected Accepted, got ${r.status}`);
+            }
+            // The CP should send a StopTransaction with reason=HardReset
+            // for the active session before tearing down.
+            const stop = await handle.waitForAction('StopTransaction');
+            const reason = (stop.payload as { reason?: string }).reason;
+            if (reason !== 'HardReset') {
+                throw new Error(`StopTransaction reason expected HardReset, got ${String(reason)}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.unlock.unlocked-on-valid-connector',
+        title: 'UnlockConnector returns Unlocked for a valid connector',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            const r = await handle.unlockConnector(1);
+            if (r.status !== 'Unlocked') {
+                throw new Error(`UnlockConnector(1) expected Unlocked, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.unlock.not-supported-on-zero',
+        title: 'UnlockConnector(0) returns NotSupported (the device is not a connector)',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            const r = await handle.unlockConnector(0);
+            if (r.status !== 'NotSupported') {
+                throw new Error(`UnlockConnector(0) expected NotSupported, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.data-transfer.unknown-vendor-rejected',
+        title: 'DataTransfer with unknown vendorId returns UnknownVendorId',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            const r = await handle.dataTransfer('com.notarealvendor.example');
+            if (r.status !== 'UnknownVendorId') {
+                throw new Error(`expected UnknownVendorId, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.data-transfer.own-vendor-accepted',
+        title: 'DataTransfer with the device vendorId is Accepted',
+        profile: 'Core',
+        run: async ({ handle, device }) => {
+            await handle.waitForBoot();
+            const r = await handle.dataTransfer(device.vendor);
+            if (r.status !== 'Accepted') {
+                throw new Error(`expected Accepted for own vendorId, got ${r.status}`);
+            }
+        },
+    },
+
+    {
+        id: 'core.trigger.heartbeat-sends-frame',
+        title: 'TriggerMessage Heartbeat causes the CP to emit a Heartbeat',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            const before = handle
+                .framesFor('Heartbeat')
+                .filter((f) => f.direction === 'in').length;
+            const r = await handle.triggerMessage('Heartbeat');
+            if (r.status !== 'Accepted') {
+                throw new Error(`TriggerMessage Heartbeat expected Accepted, got ${r.status}`);
+            }
+            // Wait briefly — the simulator fires the triggered frame
+            // asynchronously after replying Accepted.
+            const deadline = Date.now() + 1000;
+            while (Date.now() < deadline) {
+                const after = handle.framesFor('Heartbeat').filter((f) => f.direction === 'in').length;
+                if (after > before) return;
+                await sleep(50);
+            }
+            throw new Error('Heartbeat frame did not follow TriggerMessage within 1s');
+        },
+    },
+
+    {
+        id: 'core.trigger.status-notification-sends-frame',
+        title: 'TriggerMessage StatusNotification causes the CP to emit current status',
+        profile: 'Core',
+        run: async ({ handle }) => {
+            await handle.waitForBoot();
+            await handle.waitForStatus('Available', 1);
+            const before = handle
+                .framesFor('StatusNotification')
+                .filter((f) => f.direction === 'in').length;
+            const r = await handle.triggerMessage('StatusNotification', 1);
+            if (r.status !== 'Accepted') {
+                throw new Error(`TriggerMessage StatusNotification expected Accepted, got ${r.status}`);
+            }
+            const deadline = Date.now() + 1000;
+            while (Date.now() < deadline) {
+                const after = handle
+                    .framesFor('StatusNotification')
+                    .filter((f) => f.direction === 'in').length;
+                if (after > before) return;
+                await sleep(50);
+            }
+            throw new Error('StatusNotification did not follow TriggerMessage within 1s');
+        },
+    },
 ];
