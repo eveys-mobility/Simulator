@@ -67,10 +67,10 @@ describe('Store — schema migration', () => {
             s2.close();
         });
 
-        it('re-running migrations on a populated DB does not lose rows', () => {
+        it('re-running every migration on a populated DB is a no-op (idempotent)', () => {
             const s1 = new Store(path);
             s1.insertDevice(sample);
-            s1.insertSession({
+            const sessionRowId = s1.insertSession({
                 deviceId: sample.id,
                 connectorId: 1,
                 transactionId: 1,
@@ -82,22 +82,23 @@ describe('Store — schema migration', () => {
                 energyWh: 1000,
                 peakPowerKw: 5,
             });
-            // Force the migration runner to re-evaluate by clearing
-            // user_version. Idempotent CREATE/ALTER would crash if a
-            // step hadn't been written defensively (e.g., migration
-            // re-adds a column that already exists). The Store ctor
-            // catches this — if it throws, the migration set is buggy.
+            // Force the migration runner to re-evaluate every step by
+            // clearing user_version. Each CREATE/ALTER must be guarded
+            // (`IF NOT EXISTS` + addColumnIfMissing) so this is a no-op
+            // — that's what makes a future "rebuild schema" / replay
+            // path safe to ship.
             s1.db.pragma('user_version = 0');
             s1.close();
 
-            // A fresh Store call against the same file should run every
-            // migration again from scratch and complete without error.
-            // We expect this to throw because ALTER TABLE ADD COLUMN
-            // hits "duplicate column name" — which is the exact scenario
-            // a future "force re-run" feature would need to handle.
-            // Documenting the current behaviour here so a refactor can't
-            // silently change it.
-            expect(() => new Store(path)).toThrow(/duplicate column name|already exists/);
+            const s2 = new Store(path);
+            // Migrations ran cleanly; rows survive untouched.
+            expect(s2.getDevice(sample.id)?.id).toBe(sample.id);
+            const sessions = s2.listSessions({ deviceId: sample.id });
+            expect(sessions).toHaveLength(1);
+            expect(sessions[0]?.id).toBe(sessionRowId);
+            // user_version returned to the latest after replay.
+            expect(s2.db.pragma('user_version', { simple: true })).toBe(8);
+            s2.close();
         });
     });
 });

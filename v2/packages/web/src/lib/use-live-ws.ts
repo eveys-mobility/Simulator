@@ -99,11 +99,12 @@ export function useLiveWs() {
                         // dropped repetitive MeterValues/Heartbeat
                         // frames inside the flush window. We never
                         // try to reconstruct the dropped frames; we
-                        // just count them so the trace viewer can
-                        // show "throttled" when the load goes up.
-                        const m = msg as { dropped?: number };
-                        if (typeof m.dropped === 'number' && m.dropped > 0) {
-                            recordCoalescedDrop(m.dropped);
+                        // record them per-device so each trace viewer
+                        // can scope its "throttled" badge.
+                        const m = msg as { dropped?: number; byDevice?: Record<string, number> };
+                        const total = typeof m.dropped === 'number' ? m.dropped : 0;
+                        if (total > 0) {
+                            recordCoalescedDrop({ total, byDevice: m.byDevice ?? {} });
                         }
                         break;
                     }

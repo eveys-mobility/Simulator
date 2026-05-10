@@ -739,7 +739,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             const tickBuffer = new Map<string, unknown>(); // key: deviceId:connectorId
             const frameBuffer: unknown[] = [];
             const coalescedFrames = new Map<string, unknown>(); // key: deviceId:action
-            let droppedThisWindow = 0;
+            const droppedByDevice = new Map<string, number>();
 
             const flush = (): void => {
                 if (tickBuffer.size > 0) {
@@ -754,9 +754,18 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                     for (const payload of coalescedFrames.values()) send({ type: 'frame', payload });
                     coalescedFrames.clear();
                 }
-                if (droppedThisWindow > 0) {
-                    send({ type: 'frames-coalesced', dropped: droppedThisWindow });
-                    droppedThisWindow = 0;
+                if (droppedByDevice.size > 0) {
+                    let total = 0;
+                    const byDevice: Record<string, number> = {};
+                    for (const [id, count] of droppedByDevice) {
+                        byDevice[id] = count;
+                        total += count;
+                    }
+                    // `dropped` stays for back-compat with anything still
+                    // reading the global field; new clients use byDevice
+                    // to scope the indicator to the device a tab is on.
+                    send({ type: 'frames-coalesced', dropped: total, byDevice });
+                    droppedByDevice.clear();
                 }
             };
             const flushTimer = setInterval(flush, FLUSH_MS);
@@ -777,7 +786,9 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 const payload = { ...(e as object), at: Date.now() };
                 if (f.action && COALESCE_FRAME_ACTIONS.has(f.action) && f.deviceId) {
                     const key = `${f.deviceId}:${f.action}`;
-                    if (coalescedFrames.has(key)) droppedThisWindow += 1;
+                    if (coalescedFrames.has(key)) {
+                        droppedByDevice.set(f.deviceId, (droppedByDevice.get(f.deviceId) ?? 0) + 1);
+                    }
                     coalescedFrames.set(key, payload);
                 } else {
                     frameBuffer.push(payload);

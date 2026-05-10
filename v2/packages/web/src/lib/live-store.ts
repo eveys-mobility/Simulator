@@ -53,16 +53,22 @@ interface LiveState {
     nextTraceSeq: number;
     /** Latest progress sample per benchmark runId, keyed numerically. */
     benchmarkProgress: Map<number, BenchmarkProgress>;
-    /** Server-side coalescing telemetry. Each `frames-coalesced` WS
-     *  message bumps the counter; we keep the last sample timestamp
-     *  so the UI can dim the indicator after the load drops. */
-    coalesce: { totalDropped: number; lastSampleAt: number; lastWindowDropped: number };
+    /** Server-side coalescing telemetry. Per-device so a burst on
+     *  Device B doesn't make Device A's trace viewer flash "throttled".
+     *  Total + last-sample fields are kept for a fleet-wide indicator
+     *  if we ever add one. */
+    coalesce: {
+        totalDropped: number;
+        lastSampleAt: number;
+        lastWindowDropped: number;
+        byDevice: Map<string, { lastSampleAt: number; lastWindow: number; total: number }>;
+    };
     setBenchmarkProgress: (p: BenchmarkProgress) => void;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
     applyTick: (t: MeterTick) => void;
     appendFrame: (e: Omit<TraceEntry, 'seq'>) => void;
-    recordCoalescedDrop: (count: number) => void;
+    recordCoalescedDrop: (sample: { total: number; byDevice: Record<string, number> }) => void;
     clearTraces: (deviceId: string) => void;
     reset: (deviceId: string) => void;
     /** Drop every map entry whose deviceId isn't in `keep`. Called from
@@ -78,7 +84,7 @@ export const useLiveStore = create<LiveState>((set) => ({
     traces: new Map(),
     nextTraceSeq: 0,
     benchmarkProgress: new Map(),
-    coalesce: { totalDropped: 0, lastSampleAt: 0, lastWindowDropped: 0 },
+    coalesce: { totalDropped: 0, lastSampleAt: 0, lastWindowDropped: 0, byDevice: new Map() },
 
     setBenchmarkProgress: (p) =>
         set((s) => {
@@ -127,14 +133,27 @@ export const useLiveStore = create<LiveState>((set) => ({
             return { traces: next, nextTraceSeq: seq };
         }),
 
-    recordCoalescedDrop: (count) =>
-        set((s) => ({
-            coalesce: {
-                totalDropped: s.coalesce.totalDropped + count,
-                lastSampleAt: Date.now(),
-                lastWindowDropped: count,
-            },
-        })),
+    recordCoalescedDrop: (sample) =>
+        set((s) => {
+            const now = Date.now();
+            const byDevice = new Map(s.coalesce.byDevice);
+            for (const [id, count] of Object.entries(sample.byDevice)) {
+                const prev = byDevice.get(id);
+                byDevice.set(id, {
+                    lastSampleAt: now,
+                    lastWindow: count,
+                    total: (prev?.total ?? 0) + count,
+                });
+            }
+            return {
+                coalesce: {
+                    totalDropped: s.coalesce.totalDropped + sample.total,
+                    lastSampleAt: now,
+                    lastWindowDropped: sample.total,
+                    byDevice,
+                },
+            };
+        }),
 
     clearTraces: (deviceId) =>
         set((s) => {
@@ -149,11 +168,19 @@ export const useLiveStore = create<LiveState>((set) => ({
             const cs = new Map(s.connectorStatus);
             const tk = new Map(s.tick);
             const tr = new Map(s.traces);
+            const cb = new Map(s.coalesce.byDevice);
             on.delete(deviceId);
             for (const k of [...cs.keys()]) if (k.startsWith(`${deviceId}:`)) cs.delete(k);
             for (const k of [...tk.keys()]) if (k.startsWith(`${deviceId}:`)) tk.delete(k);
             tr.delete(deviceId);
-            return { online: on, connectorStatus: cs, tick: tk, traces: tr };
+            cb.delete(deviceId);
+            return {
+                online: on,
+                connectorStatus: cs,
+                tick: tk,
+                traces: tr,
+                coalesce: { ...s.coalesce, byDevice: cb },
+            };
         }),
 
     evictMissing: (keep) =>
@@ -169,11 +196,13 @@ export const useLiveStore = create<LiveState>((set) => ({
             const tickMissing = [...s.tick.keys()].filter(
                 (k) => !keep.has(k.split(':')[0] ?? ''),
             );
+            const coalesceMissing = [...s.coalesce.byDevice.keys()].filter((id) => !keep.has(id));
             if (
                 onlineMissing.length === 0 &&
                 tracesMissing.length === 0 &&
                 connStatusMissing.length === 0 &&
-                tickMissing.length === 0
+                tickMissing.length === 0 &&
+                coalesceMissing.length === 0
             ) {
                 return {};
             }
@@ -181,11 +210,19 @@ export const useLiveStore = create<LiveState>((set) => ({
             const cs = new Map(s.connectorStatus);
             const tk = new Map(s.tick);
             const tr = new Map(s.traces);
+            const cb = new Map(s.coalesce.byDevice);
             for (const id of onlineMissing) on.delete(id);
             for (const id of tracesMissing) tr.delete(id);
             for (const k of connStatusMissing) cs.delete(k);
             for (const k of tickMissing) tk.delete(k);
-            return { online: on, connectorStatus: cs, tick: tk, traces: tr };
+            for (const id of coalesceMissing) cb.delete(id);
+            return {
+                online: on,
+                connectorStatus: cs,
+                tick: tk,
+                traces: tr,
+                coalesce: { ...s.coalesce, byDevice: cb },
+            };
         }),
 }));
 
