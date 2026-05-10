@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Save, Trash, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { api } from '@/lib/api';
+import { api, type DeviceWithRuntime } from '@/lib/api';
+import { useLiveStore } from '@/lib/live-store';
 
 export function SettingsPage() {
     const qc = useQueryClient();
@@ -116,8 +119,132 @@ export function SettingsPage() {
                 </CardContent>
             </Card>
 
+            <DeletedDevicesCard />
+
             <ResetDatabaseCard />
         </div>
+    );
+}
+
+type DeletedDevice = DeviceWithRuntime & { deletedAt: string };
+
+function DeletedDevicesCard() {
+    const qc = useQueryClient();
+    const resetLiveDevice = useLiveStore((s) => s.reset);
+    const { data, isLoading } = useQuery({
+        queryKey: ['deleted-devices'],
+        queryFn: api.listDeletedDevices,
+    });
+    const [purgeTarget, setPurgeTarget] = useState<DeletedDevice | null>(null);
+
+    const restore = useMutation({
+        mutationFn: api.restoreDevice,
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['deleted-devices'] });
+            qc.invalidateQueries({ queryKey: ['devices'] });
+        },
+    });
+    const purge = useMutation({
+        mutationFn: api.purgeDevice,
+        onSuccess: (_data, deviceId) => {
+            qc.invalidateQueries({ queryKey: ['deleted-devices'] });
+            qc.invalidateQueries({ queryKey: ['sessions'] });
+            resetLiveDevice(deviceId);
+            setPurgeTarget(null);
+        },
+    });
+
+    const list = data ?? [];
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                    <Trash className="h-4 w-4" /> Deleted devices
+                    {list.length > 0 && (
+                        <Badge variant="outline" className="text-xs">
+                            {list.length}
+                        </Badge>
+                    )}
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                    Soft-deleted devices stay here so their session history is preserved. Restore brings the
+                    device back to the live fleet; purge permanently removes it and{' '}
+                    <span className="font-medium text-destructive">drops every session it ever ran</span>.
+                </p>
+                {isLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : list.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No deleted devices.</p>
+                ) : (
+                    <ul className="divide-y divide-border/50 rounded-md border">
+                        {list.map((d) => (
+                            <li key={d.id} className="flex items-center gap-3 px-3 py-2">
+                                <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>{d.type}</Badge>
+                                <div className="min-w-0 flex-1">
+                                    <div className="font-medium truncate">{d.displayName}</div>
+                                    <div className="font-mono text-xs text-muted-foreground truncate">
+                                        {d.id}
+                                    </div>
+                                </div>
+                                <span className="hidden sm:block text-xs text-muted-foreground">
+                                    deleted {new Date(d.deletedAt).toLocaleString()}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => restore.mutate(d.id)}
+                                        disabled={restore.isPending}
+                                    >
+                                        <RotateCcw className="h-3.5 w-3.5" />
+                                        Restore
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        onClick={() => setPurgeTarget(d)}
+                                        disabled={purge.isPending}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Purge
+                                    </Button>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </CardContent>
+
+            <ConfirmDialog
+                open={purgeTarget !== null}
+                onOpenChange={(o) => {
+                    if (!o) setPurgeTarget(null);
+                }}
+                title="Purge device permanently"
+                description={
+                    purgeTarget ? (
+                        <>
+                            Permanently remove{' '}
+                            <span className="font-medium text-foreground">{purgeTarget.displayName}</span>{' '}
+                            <span className="font-mono text-xs text-muted-foreground">({purgeTarget.id})</span>{' '}
+                            and every session it ever ran. This cannot be undone — type the word below if you
+                            really mean it.
+                        </>
+                    ) : null
+                }
+                confirmText="Purge forever"
+                destructive
+                typedConfirmation="PURGE"
+                pending={purge.isPending}
+                onConfirm={() => {
+                    if (purgeTarget) purge.mutate(purgeTarget.id);
+                }}
+            />
+        </Card>
     );
 }
 

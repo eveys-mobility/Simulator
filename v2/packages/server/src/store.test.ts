@@ -227,6 +227,91 @@ describe('Store — devices', () => {
         expect(s.deleteDevice(sample.id)).toBe(false);
         s.close();
     });
+
+    it('listDeletedDevices returns soft-deleted rows newest first with deletedAt', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.insertDevice({ ...sample, id: 'cp_other', createdAt: '2026-05-09T12:00:00.000Z' });
+        s.deleteDevice(sample.id);
+        // Ensure deleted_at differs by at least 1ms so the ORDER BY
+        // is deterministic; sqlite stores ISO-8601 strings literally.
+        s.db.prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`).run(
+            '2026-05-10T01:00:00.000Z',
+            sample.id,
+        );
+        s.deleteDevice('cp_other');
+        s.db.prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`).run(
+            '2026-05-10T02:00:00.000Z',
+            'cp_other',
+        );
+        const list = s.listDeletedDevices();
+        expect(list).toHaveLength(2);
+        expect(list[0]?.id).toBe('cp_other'); // newest deletion first
+        expect(list[0]?.deletedAt).toBe('2026-05-10T02:00:00.000Z');
+        expect(list[1]?.id).toBe(sample.id);
+        s.close();
+    });
+
+    it('restoreDevice un-soft-deletes and returns the row', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.deleteDevice(sample.id);
+        expect(s.getDevice(sample.id)).toBeNull();
+
+        const restored = s.restoreDevice(sample.id);
+        expect(restored?.id).toBe(sample.id);
+        expect(s.getDevice(sample.id)?.id).toBe(sample.id);
+        // Subsequent restore on a live row is a no-op.
+        expect(s.restoreDevice(sample.id)).toBeNull();
+        s.close();
+    });
+
+    it('restoreDevice returns null for an unknown id', () => {
+        const s = new Store(':memory:');
+        expect(s.restoreDevice('nope')).toBeNull();
+        s.close();
+    });
+
+    it('purgeDevice hard-deletes and cascades sessions', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        const sessionRowId = s.insertSession({
+            deviceId: sample.id,
+            connectorId: 1,
+            transactionId: 1,
+            idTag: 'TAG',
+            status: 'completed',
+            startedAt: '2026-05-09T12:00:00.000Z',
+            endedAt: '2026-05-09T12:30:00.000Z',
+            endReason: 'Local',
+            energyWh: 100,
+            peakPowerKw: 5,
+        });
+        s.deleteDevice(sample.id);
+        // Session still exists after soft-delete.
+        expect(s.listSessions({ deviceId: sample.id })).toHaveLength(1);
+
+        expect(s.purgeDevice(sample.id)).toBe(true);
+        // Both the device row and its session are gone — the FK
+        // CASCADE took the audit trail with it. That's the entire
+        // point of the purge path.
+        expect(s.listDeletedDevices()).toEqual([]);
+        expect(s.listSessions({ deviceId: sample.id })).toEqual([]);
+        // Idempotent on the now-empty row.
+        expect(s.purgeDevice(sample.id)).toBe(false);
+        // Silence the unused warning.
+        expect(sessionRowId).toBeGreaterThan(0);
+        s.close();
+    });
+
+    it('purgeDevice refuses to drop a live device (must soft-delete first)', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        // Not soft-deleted yet → purge is a no-op.
+        expect(s.purgeDevice(sample.id)).toBe(false);
+        expect(s.getDevice(sample.id)?.id).toBe(sample.id);
+        s.close();
+    });
 });
 
 describe('Store — app settings', () => {
