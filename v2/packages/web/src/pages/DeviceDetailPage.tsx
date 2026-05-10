@@ -9,6 +9,7 @@ import { ChargingProfiles } from '@/components/ChargingProfiles';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { LiveDot } from '@/components/LiveDot';
 import { ManualControls } from '@/components/ManualControls';
+import { OcppConfigCard } from '@/components/OcppConfigCard';
 import { TraceViewer } from '@/components/TraceViewer';
 import { api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
@@ -140,6 +141,8 @@ export function DeviceDetailPage() {
             </div>
 
             <ManualControls device={device} />
+
+            <OcppConfigCard deviceId={device.id} />
 
             <ChargingProfiles deviceId={device.id} />
 
