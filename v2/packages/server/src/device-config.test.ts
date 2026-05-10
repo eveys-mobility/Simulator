@@ -182,4 +182,98 @@ describe('per-device OCPP config endpoints', () => {
         const r = await fetch(`${base}/api/devices/nope/config`);
         expect(r.status).toBe(404);
     });
+
+    it('PUT bulk applies every change independently and returns per-key status', async () => {
+        const { app, base, manager, store } = await setup();
+        cleanup = async () => {
+            await manager.stopAll();
+            await sleep(20);
+            await app.close();
+            store.close();
+        };
+        const created = (await fetch(`${base}/api/devices`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type: 'AC' }),
+        }).then((r) => r.json())) as { id: string };
+
+        const r = await fetch(`${base}/api/devices/${created.id}/config`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                changes: {
+                    HeartbeatInterval: '90',
+                    AuthorizeRemoteTxRequests: 'true',
+                    NumberOfConnectors: '99', // read-only → Rejected
+                    BogusKey: 'whatever',     // unknown → NotSupported
+                    MeterValueSampleInterval: 'not-a-number', // bad type → Rejected
+                },
+            }),
+        }).then((r) => r.json() as Promise<{ results: Array<{ key: string; status: string; value: string }> }>);
+
+        // Map results by key for easier assertion.
+        const byKey = Object.fromEntries(r.results.map((x) => [x.key, x]));
+        expect(byKey.HeartbeatInterval?.status).toBe('Accepted');
+        expect(byKey.HeartbeatInterval?.value).toBe('90');
+        expect(byKey.AuthorizeRemoteTxRequests?.status).toBe('Accepted');
+        expect(byKey.AuthorizeRemoteTxRequests?.value).toBe('true');
+        expect(byKey.NumberOfConnectors?.status).toBe('Rejected');
+        expect(byKey.NumberOfConnectors?.value).toBe('1'); // unchanged
+        expect(byKey.BogusKey?.status).toBe('NotSupported');
+        expect(byKey.MeterValueSampleInterval?.status).toBe('Rejected');
+
+        // Persisted state matches the Accepted writes only.
+        const cfg = (await fetch(`${base}/api/devices/${created.id}/config`).then((r) =>
+            r.json(),
+        )) as { keys: Array<{ key: string; value: string }> };
+        expect(cfg.keys.find((k) => k.key === 'HeartbeatInterval')?.value).toBe('90');
+        expect(cfg.keys.find((k) => k.key === 'AuthorizeRemoteTxRequests')?.value).toBe('true');
+        expect(cfg.keys.find((k) => k.key === 'MeterValueSampleInterval')?.value).toBe('60'); // default unchanged
+    });
+
+    it('PUT bulk on an unknown device returns 404', async () => {
+        const { app, base, manager, store } = await setup();
+        cleanup = async () => {
+            await manager.stopAll();
+            await sleep(20);
+            await app.close();
+            store.close();
+        };
+        const r = await fetch(`${base}/api/devices/nope/config`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ changes: { HeartbeatInterval: '60' } }),
+        });
+        expect(r.status).toBe(404);
+    });
+
+    it('PUT bulk with a malformed body returns 400', async () => {
+        const { app, base, manager, store } = await setup();
+        cleanup = async () => {
+            await manager.stopAll();
+            await sleep(20);
+            await app.close();
+            store.close();
+        };
+        const created = (await fetch(`${base}/api/devices`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type: 'AC' }),
+        }).then((r) => r.json())) as { id: string };
+
+        // 'changes' is required; non-string values are rejected.
+        const r1 = await fetch(`${base}/api/devices/${created.id}/config`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        expect(r1.status).toBe(400);
+
+        const r2 = await fetch(`${base}/api/devices/${created.id}/config`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ changes: { HeartbeatInterval: 60 } }), // number, not string
+        });
+        expect(r2.status).toBe(400);
+    });
 });
