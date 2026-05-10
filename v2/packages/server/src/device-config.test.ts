@@ -247,6 +247,41 @@ describe('per-device OCPP config endpoints', () => {
         expect(r.status).toBe(404);
     });
 
+    it('PUT bulk preserves response order for the requested keys', async () => {
+        const { app, base, manager, store } = await setup();
+        cleanup = async () => {
+            await manager.stopAll();
+            await sleep(20);
+            await app.close();
+            store.close();
+        };
+        const created = (await fetch(`${base}/api/devices`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type: 'AC' }),
+        }).then((r) => r.json())) as { id: string };
+
+        const requestKeys = [
+            'MeterValueSampleInterval',
+            'HeartbeatInterval',
+            'AuthorizeRemoteTxRequests',
+            'LocalAuthorizeOffline',
+        ];
+        const changes: Record<string, string> = {
+            MeterValueSampleInterval: '20',
+            HeartbeatInterval: '180',
+            AuthorizeRemoteTxRequests: 'true',
+            LocalAuthorizeOffline: 'false',
+        };
+        const r = await fetch(`${base}/api/devices/${created.id}/config`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ changes }),
+        }).then((r) => r.json() as Promise<{ results: Array<{ key: string }> }>);
+
+        expect(r.results.map((x) => x.key)).toEqual(requestKeys);
+    });
+
     it('PUT bulk with a malformed body returns 400', async () => {
         const { app, base, manager, store } = await setup();
         cleanup = async () => {
