@@ -97,7 +97,7 @@ describe('Store — schema migration', () => {
             expect(sessions).toHaveLength(1);
             expect(sessions[0]?.id).toBe(sessionRowId);
             // user_version returned to the latest after replay.
-            expect(s2.db.pragma('user_version', { simple: true })).toBe(8);
+            expect(s2.db.pragma('user_version', { simple: true })).toBe(9);
             s2.close();
         });
     });
