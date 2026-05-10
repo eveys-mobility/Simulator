@@ -63,6 +63,11 @@ interface ConnectorState {
     /** One-shot timer that fires at `expiryDate` and releases the
      *  reservation. Cleared on cancel / consume / shutdown. */
     reservationExpiryTimer: NodeJS.Timeout | null;
+    /** OCPP §9.1.5 ConnectionTimeOut: how long the CP stays in
+     *  Preparing before reverting to Available when no plug-in /
+     *  session start follows. Armed when status flips *to* Preparing,
+     *  cleared when it flips away or on shutdown. */
+    connectionTimeoutTimer: NodeJS.Timeout | null;
 }
 
 /**
@@ -145,6 +150,7 @@ export class Simulator extends EventEmitter {
                 faultClearTimer: null,
                 reservation: null,
                 reservationExpiryTimer: null,
+                connectionTimeoutTimer: null,
             });
         }
         this.config = new OcppConfig(store, device.id, numConnectors);
@@ -187,6 +193,7 @@ export class Simulator extends EventEmitter {
             if (c.tickTimer) clearInterval(c.tickTimer);
             if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
             if (c.reservationExpiryTimer) clearTimeout(c.reservationExpiryTimer);
+            if (c.connectionTimeoutTimer) clearTimeout(c.connectionTimeoutTimer);
         }
         this.clearFirmwareTimers();
         this.clearDiagnosticsTimers();
@@ -535,6 +542,12 @@ export class Simulator extends EventEmitter {
     private async setStatus(connectorId: number, status: ConnectorStatus): Promise<void> {
         const c = this.requireConnector(connectorId);
         c.status = status;
+        // §9.1.5 ConnectionTimeOut: arm when entering Preparing, drop
+        // on every other transition. setStatus is the single chokepoint
+        // for connector-status changes, so this is the right place to
+        // wire it. Bool config keys / configs may also override the
+        // window — re-read on each arm.
+        this.armOrClearConnectionTimeout(connectorId, status);
         this.emit('state', { connectorId, status });
         if (this.client.isOnline()) {
             try {
@@ -543,6 +556,43 @@ export class Simulator extends EventEmitter {
                 this.emit('error', err);
             }
         }
+    }
+
+    private armOrClearConnectionTimeout(connectorId: number, status: ConnectorStatus): void {
+        const c = this.requireConnector(connectorId);
+        // Always drop the previous timer first — re-entering Preparing
+        // (e.g. plug-out → plug-in cycle) starts a fresh window, and
+        // any non-Preparing status cancels.
+        if (c.connectionTimeoutTimer) {
+            clearTimeout(c.connectionTimeoutTimer);
+            c.connectionTimeoutTimer = null;
+        }
+        if (status !== 'Preparing') return;
+        // Read the latest config every arm — change-from-CSMS during a
+        // Preparing window is rare but spec-allowed; the *next* Preparing
+        // gets the new value, this one keeps the value it was armed with.
+        const seconds = this.config.getNumber('ConnectionTimeOut');
+        if (!seconds || seconds <= 0) return; // 0 disables the watchdog
+        c.connectionTimeoutTimer = setTimeout(() => {
+            c.connectionTimeoutTimer = null;
+            void this.handleConnectionTimeout(connectorId);
+        }, seconds * 1000);
+    }
+
+    /** Fires when ConnectionTimeOut elapses while still in Preparing.
+     *  Reverts the connector to Available — matching the OCPP §9.1.5
+     *  semantics ("the connector returns to Available if the user does
+     *  not plug in within the configured time"). */
+    private async handleConnectionTimeout(connectorId: number): Promise<void> {
+        if (this.stopped) return;
+        const c = this.connectors.get(connectorId);
+        if (!c || c.status !== 'Preparing') return;
+        // pluggedIn is the operator's intent; leave it alone — if a
+        // plug arrives later we'll re-enter Preparing via plugIn().
+        // For symmetry with plugOut(), clear it so the operator's
+        // mental model matches "the cable went away".
+        c.pluggedIn = false;
+        await this.setStatus(connectorId, 'Available');
     }
 
     private requireConnector(id: number): ConnectorState {
