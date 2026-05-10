@@ -131,6 +131,7 @@ type DeletedDevice = DeviceWithRuntime & { deletedAt: string };
 function DeletedDevicesCard() {
     const qc = useQueryClient();
     const resetLiveDevice = useLiveStore((s) => s.reset);
+    const setOnline = useLiveStore((s) => s.setOnline);
     const { data, isLoading } = useQuery({
         queryKey: ['deleted-devices'],
         queryFn: api.listDeletedDevices,
@@ -139,7 +140,19 @@ function DeletedDevicesCard() {
 
     const restore = useMutation({
         mutationFn: api.restoreDevice,
-        onSuccess: () => {
+        onSuccess: (restored) => {
+            // Seed the live store with the device's current online state
+            // straight from the server response. Without this the row
+            // briefly shows "Offline" between the next /devices refetch
+            // landing and the WS 'state' push that flips it — a 1-frame
+            // flicker the user sees as a stale indicator on /devices.
+            setOnline(restored.id, restored.online);
+            // Optimistically prepend the device into the cached list so
+            // a navigation to /devices right after Restore renders the
+            // row immediately, not after the refetch round-trip.
+            qc.setQueryData<DeviceWithRuntime[]>(['devices'], (prev) =>
+                prev && !prev.find((d) => d.id === restored.id) ? [...prev, restored] : prev,
+            );
             qc.invalidateQueries({ queryKey: ['deleted-devices'] });
             qc.invalidateQueries({ queryKey: ['devices'] });
         },

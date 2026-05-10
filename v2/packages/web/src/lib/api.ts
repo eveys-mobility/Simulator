@@ -62,7 +62,7 @@ export const api = {
     listDeletedDevices: () =>
         http<Array<DeviceWithRuntime & { deletedAt: string }>>('GET', '/devices/deleted'),
     restoreDevice: (id: string) => http<DeviceWithRuntime>('POST', `/devices/${id}/restore`),
-    purgeDevice: (id: string) => http<void>('DELETE', `/devices/${id}/purge`, { confirm: 'PURGE' }),
+    purgeDevice: (id: string) => http<void>('DELETE', `/devices/${id}/purge?confirm=PURGE`),
     startSession: (deviceId: string, connectorId: number) =>
         http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
     stopSession: (deviceId: string, connectorId: number, reason = 'Local') =>
