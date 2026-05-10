@@ -1,5 +1,13 @@
 import { describe, it } from 'vitest';
-import { ALL_CASES, CORE_CASES, REMOTE_TRIGGER_CASES, SMART_CHARGING_CASES } from './index.js';
+import {
+    ALL_CASES,
+    CORE_CASES,
+    FIRMWARE_MANAGEMENT_CASES,
+    LOCAL_AUTH_LIST_CASES,
+    REMOTE_TRIGGER_CASES,
+    RESERVATION_CASES,
+    SMART_CHARGING_CASES,
+} from './index.js';
 import { runConformanceCase } from './runner.js';
 
 /**
@@ -37,9 +45,39 @@ describe('OCPP 1.6 RemoteTrigger conformance', () => {
     }
 });
 
+describe('OCPP 1.6 Reservation conformance', () => {
+    for (const c of RESERVATION_CASES) {
+        it(`${c.id} — ${c.title}`, async () => {
+            await runConformanceCase(c);
+        });
+    }
+});
+
+describe('OCPP 1.6 LocalAuthListManagement conformance', () => {
+    for (const c of LOCAL_AUTH_LIST_CASES) {
+        it(`${c.id} — ${c.title}`, async () => {
+            await runConformanceCase(c);
+        });
+    }
+});
+
+describe('OCPP 1.6 FirmwareManagement conformance', () => {
+    for (const c of FIRMWARE_MANAGEMENT_CASES) {
+        it(`${c.id} — ${c.title}`, async () => {
+            await runConformanceCase(c);
+        });
+    }
+});
+
 describe('ALL_CASES integrity', () => {
     it('contains every per-profile array exactly once with unique ids', () => {
-        const expected = CORE_CASES.length + SMART_CHARGING_CASES.length + REMOTE_TRIGGER_CASES.length;
+        const expected =
+            CORE_CASES.length +
+            SMART_CHARGING_CASES.length +
+            REMOTE_TRIGGER_CASES.length +
+            RESERVATION_CASES.length +
+            LOCAL_AUTH_LIST_CASES.length +
+            FIRMWARE_MANAGEMENT_CASES.length;
         if (ALL_CASES.length !== expected) {
             throw new Error(
                 `ALL_CASES has ${ALL_CASES.length} entries; profile arrays sum to ${expected}`,
