@@ -209,4 +209,24 @@ export const api = {
             `/sessions${qs ? '?' + qs : ''}`,
         );
     },
+
+    listConformanceCases: () =>
+        http<{ cases: Array<{ id: string; title: string; profile: string }> }>(
+            'GET',
+            '/conformance/cases',
+        ),
+    runConformance: () =>
+        http<{
+            passed: number;
+            failed: number;
+            durationMs: number;
+            cases: Array<{
+                id: string;
+                title: string;
+                profile: string;
+                status: 'passed' | 'failed';
+                error: string | null;
+                durationMs: number;
+            }>;
+        }>('POST', '/conformance/run'),
 };
