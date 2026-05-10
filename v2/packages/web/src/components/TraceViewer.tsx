@@ -36,7 +36,9 @@ const COALESCE_INDICATOR_MS = 3000;
 export function TraceViewer({ deviceId }: Props) {
     const traces = useLiveStore((s) => s.traces.get(deviceId)) ?? EMPTY;
     const clear = useLiveStore((s) => s.clearTraces);
-    const coalesce = useLiveStore((s) => s.coalesce);
+    // Per-device coalesce telemetry — the badge fires only when this
+    // specific device is throttling, not when some other tab's device is.
+    const deviceCoalesce = useLiveStore((s) => s.coalesce.byDevice.get(deviceId));
 
     const [filter, setFilter] = useState('');
     const [follow, setFollow] = useState(true);
@@ -47,13 +49,15 @@ export function TraceViewer({ deviceId }: Props) {
     // the last value forever.
     const [, setTick] = useState(0);
     useEffect(() => {
-        if (coalesce.lastSampleAt === 0) return;
+        if (!deviceCoalesce || deviceCoalesce.lastSampleAt === 0) return;
         const id = setInterval(() => setTick((n) => n + 1), 500);
         return () => clearInterval(id);
-    }, [coalesce.lastSampleAt]);
+    }, [deviceCoalesce]);
 
     const isThrottling =
-        coalesce.lastSampleAt > 0 && Date.now() - coalesce.lastSampleAt < COALESCE_INDICATOR_MS;
+        deviceCoalesce !== undefined &&
+        deviceCoalesce.lastSampleAt > 0 &&
+        Date.now() - deviceCoalesce.lastSampleAt < COALESCE_INDICATOR_MS;
 
     const filtered = useMemo(() => {
         if (!filter.trim()) return traces;
@@ -90,14 +94,14 @@ export function TraceViewer({ deviceId }: Props) {
                         {filter && filtered.length !== traces.length && ` of ${traces.length}`}
                         {traces.length === 500 && ' (last 500)'}
                     </span>
-                    {isThrottling && (
+                    {isThrottling && deviceCoalesce && (
                         <Badge
                             variant="outline"
                             className="gap-1 bg-amber-500/15 text-amber-600 border-amber-500/30"
-                            title={`Server coalesced ${coalesce.totalDropped} repetitive frames since this tab opened`}
+                            title={`Server coalesced ${deviceCoalesce.total} repetitive frames for this device since the tab opened`}
                         >
                             <Waves className="h-3 w-3" />
-                            throttled +{coalesce.lastWindowDropped}
+                            throttled +{deviceCoalesce.lastWindow}
                         </Badge>
                     )}
                 </CardTitle>

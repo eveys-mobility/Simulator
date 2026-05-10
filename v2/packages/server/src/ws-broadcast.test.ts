@@ -22,6 +22,7 @@ interface AnyMessage {
     type: string;
     payload?: unknown;
     dropped?: number;
+    byDevice?: Record<string, number>;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -89,8 +90,41 @@ describe('WS broadcast coalescing', () => {
             (m) => m.type === 'frame' && (m.payload as { action?: string }).action === 'MeterValues',
         );
         expect(meterFrames.length).toBeLessThanOrEqual(2);
-        const dropped = messages.find((m) => m.type === 'frames-coalesced')?.dropped ?? 0;
-        expect(dropped).toBeGreaterThanOrEqual(48);
+        const summary = messages.find((m) => m.type === 'frames-coalesced');
+        expect(summary?.dropped ?? 0).toBeGreaterThanOrEqual(48);
+        // Per-device telemetry must include the device that fired the
+        // burst — otherwise the SPA can't scope the indicator to the
+        // tab the operator is on.
+        expect(summary?.byDevice?.cp_x ?? 0).toBeGreaterThanOrEqual(48);
+    });
+
+    it('attributes drops to the right device when two are burst-firing', async () => {
+        const { app, manager, store, url } = await setup();
+        cleanup = async () => {
+            await app.close();
+            store.close();
+        };
+        const messages = await collect(url, 250, () => {
+            for (let i = 0; i < 30; i++) {
+                manager.emit('frame', {
+                    deviceId: 'cp_a',
+                    direction: 'in',
+                    action: 'MeterValues',
+                    id: `a-${i}`,
+                    payload: {},
+                });
+                manager.emit('frame', {
+                    deviceId: 'cp_b',
+                    direction: 'in',
+                    action: 'MeterValues',
+                    id: `b-${i}`,
+                    payload: {},
+                });
+            }
+        });
+        const summary = messages.find((m) => m.type === 'frames-coalesced');
+        expect(summary?.byDevice?.cp_a ?? 0).toBeGreaterThanOrEqual(28);
+        expect(summary?.byDevice?.cp_b ?? 0).toBeGreaterThanOrEqual(28);
     });
 
     it('coalesces ticks per (device, connector)', async () => {

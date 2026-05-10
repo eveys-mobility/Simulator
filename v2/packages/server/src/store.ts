@@ -599,11 +599,30 @@ function rowToSession(r: SessionRow): Session {
     };
 }
 
+/**
+ * SQLite doesn't have `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so
+ * each ADD COLUMN migration probes PRAGMA table_info first. Without
+ * this, re-running a migration on a populated DB (the path a future
+ * "rebuild schema" feature would walk) crashes with `duplicate column
+ * name`. The cost is one extra row read per migration; not worth
+ * caring about.
+ */
+function addColumnIfMissing(
+    db: Database.Database,
+    table: string,
+    column: string,
+    typeAndDefault: string,
+): void {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (cols.some((c) => c.name === column)) return;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeAndDefault}`);
+}
+
 const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // v1 — initial schema
     (db) => {
         db.exec(`
-            CREATE TABLE devices (
+            CREATE TABLE IF NOT EXISTS devices (
                 id                TEXT PRIMARY KEY,
                 display_name      TEXT NOT NULL,
                 type              TEXT NOT NULL CHECK(type IN ('AC','DC')),
@@ -616,7 +635,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 dc_profile        TEXT,
                 created_at        TEXT NOT NULL
             );
-            CREATE TABLE sessions (
+            CREATE TABLE IF NOT EXISTS sessions (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
                 connector_id    INTEGER NOT NULL,
@@ -629,14 +648,14 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 energy_wh       REAL NOT NULL DEFAULT 0,
                 peak_power_kw   REAL NOT NULL DEFAULT 0
             );
-            CREATE INDEX sessions_device ON sessions(device_id);
-            CREATE INDEX sessions_status ON sessions(status);
+            CREATE INDEX IF NOT EXISTS sessions_device ON sessions(device_id);
+            CREATE INDEX IF NOT EXISTS sessions_status ON sessions(status);
         `);
     },
     // v2 — per-device OCPP configuration store
     (db) => {
         db.exec(`
-            CREATE TABLE device_config (
+            CREATE TABLE IF NOT EXISTS device_config (
                 device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
                 key        TEXT NOT NULL,
                 value      TEXT NOT NULL,
@@ -647,7 +666,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // v3 — single-row app-wide settings (default ocpp url, etc.)
     (db) => {
         db.exec(`
-            CREATE TABLE app_settings (
+            CREATE TABLE IF NOT EXISTS app_settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
@@ -657,13 +676,13 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // line-to-line reporting flag). Stored as JSON for the same reason
     // as dc_profile: small, optional, easier to evolve than columns.
     (db) => {
-        db.exec(`ALTER TABLE devices ADD COLUMN ac_wiring TEXT`);
+        addColumnIfMissing(db, 'devices', 'ac_wiring', 'TEXT');
     },
     // v5 — benchmark runs (Phase 7b). One row per scenario invocation.
     // Scenario + summary stored as JSON because both shapes evolve.
     (db) => {
         db.exec(`
-            CREATE TABLE benchmark_runs (
+            CREATE TABLE IF NOT EXISTS benchmark_runs (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario     TEXT NOT NULL,
                 status       TEXT NOT NULL CHECK(status IN ('running','completed','stopped','failed')),
@@ -671,7 +690,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 ended_at     TEXT,
                 summary      TEXT
             );
-            CREATE INDEX benchmark_runs_status ON benchmark_runs(status);
+            CREATE INDEX IF NOT EXISTS benchmark_runs_status ON benchmark_runs(status);
         `);
     },
     // v6 — charging profiles (Phase 8). One row per (device, connector,
@@ -680,7 +699,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // it isn't a primary key (CSMS may reuse ids across devices).
     (db) => {
         db.exec(`
-            CREATE TABLE charging_profiles (
+            CREATE TABLE IF NOT EXISTS charging_profiles (
                 row_id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
                 connector_id INTEGER NOT NULL,
@@ -690,7 +709,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 profile_json TEXT NOT NULL,
                 UNIQUE(device_id, connector_id, purpose, stack_level)
             );
-            CREATE INDEX charging_profiles_device ON charging_profiles(device_id);
+            CREATE INDEX IF NOT EXISTS charging_profiles_device ON charging_profiles(device_id);
         `);
     },
     // v7 — OCPP basic-auth password per device (§17.4). Stored in plain
@@ -698,15 +717,15 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // already on the wire as Basic auth. Real production credentials
     // should be injected at deploy time, not stored in this DB.
     (db) => {
-        db.exec(`ALTER TABLE devices ADD COLUMN auth_password TEXT`);
+        addColumnIfMissing(db, 'devices', 'auth_password', 'TEXT');
     },
     // v8 — soft-delete column. Hard-deleting a device used to cascade
     // through the FK and drop every session row, wiping audit history.
     // We now mark deleted_at instead and filter on read; the device's
     // simulator is despawned, but the rows stick around for /sessions.
     (db) => {
-        db.exec(`ALTER TABLE devices ADD COLUMN deleted_at TEXT`);
-        db.exec(`CREATE INDEX devices_deleted_at ON devices(deleted_at)`);
+        addColumnIfMissing(db, 'devices', 'deleted_at', 'TEXT');
+        db.exec(`CREATE INDEX IF NOT EXISTS devices_deleted_at ON devices(deleted_at)`);
     },
 ];
 
