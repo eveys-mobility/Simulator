@@ -322,6 +322,41 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         return reply.code(204).send();
     });
 
+    // ---- DELETED DEVICES (admin) ----
+    //
+    // Soft-delete leaves rows in the table with deleted_at set so the
+    // session FK survives. These endpoints expose the trash bin: list,
+    // restore back into the live fleet, or purge permanently (which
+    // cascades through sessions/config/profiles).
+
+    app.get('/api/devices/deleted', async () => {
+        return store.listDeletedDevices();
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/restore', async (req, reply) => {
+        const restored = store.restoreDevice(req.params.id);
+        if (!restored) return reply.code(404).send({ error: 'not found or not deleted' });
+        // Re-spawn the simulator so the device is live again. spawn()
+        // is idempotent — if something raced and the sim is already
+        // present, this is a no-op.
+        await manager.spawn(restored);
+        return withRuntime(restored, manager);
+    });
+
+    const PurgeBody = z.object({ confirm: z.literal('PURGE') });
+    app.delete<{ Params: { id: string } }>('/api/devices/:id/purge', async (req, reply) => {
+        // Purge cascades through sessions / config / profiles. Refuse
+        // unless the caller passes the confirmation literal — same
+        // pattern Settings reset uses for the database-wide nuke.
+        const body = PurgeBody.safeParse(req.body);
+        if (!body.success) {
+            return reply.code(400).send({ error: 'purge requires { confirm: "PURGE" } body' });
+        }
+        const purged = store.purgeDevice(req.params.id);
+        if (!purged) return reply.code(404).send({ error: 'not found or not deleted' });
+        return reply.code(204).send();
+    });
+
     // ---- SESSIONS ----
 
     const StartSessionBody = z.object({
