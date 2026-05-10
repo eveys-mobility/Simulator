@@ -906,6 +906,25 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         reply.header('Content-Type', metricsRegistry.contentType).send(body);
     });
 
+    // ---- CONFORMANCE ----
+    //
+    // Lists the bundled OCPP cases and runs the suite against a fresh
+    // pair of MockCsms + Simulator instances per case. The conformance
+    // package depends on @ocpp-sim/server, so we import it lazily here
+    // to keep the runtime cycle from biting at module init.
+
+    app.get('/api/conformance/cases', async () => {
+        const { CORE_CASES } = await import('@ocpp-sim/conformance');
+        return {
+            cases: CORE_CASES.map((c) => ({ id: c.id, title: c.title, profile: c.profile })),
+        };
+    });
+
+    app.post('/api/conformance/run', async () => {
+        const { CORE_CASES, runConformanceSuite } = await import('@ocpp-sim/conformance');
+        return runConformanceSuite(CORE_CASES);
+    });
+
     // ---- APP SETTINGS ----
     //
     // App-wide preferences that aren't tied to a single device. Today
