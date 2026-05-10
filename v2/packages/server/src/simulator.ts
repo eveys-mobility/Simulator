@@ -251,6 +251,14 @@ export class Simulator extends EventEmitter {
         if (c.transactionId) throw new Error(`connector ${connectorId} already has an active transaction`);
         if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
         if (!this.client.isOnline()) throw new Error('device offline; cannot start session');
+        // §5.5 ConcurrentTx: same idTag can only be on one active
+        // session per device. Catches the operator-driven path that
+        // bypasses RemoteStart's pre-check.
+        if (this.isIdTagAlreadyActive(idTag, connectorId)) {
+            throw new Error(
+                `idTag ${idTag} is already on an active session — concurrent transactions refused`,
+            );
+        }
         // §6.18: a reserved connector only accepts the bound idTag.
         // Any other tag must be refused — the operator's swipe stays
         // a swipe, not a reservation hijack.
@@ -543,6 +551,23 @@ export class Simulator extends EventEmitter {
         return c;
     }
 
+    /**
+     * OCPP §5.5 ConcurrentTx detection: a CP must refuse a second
+     * concurrent transaction for the same idTag. Returns true when the
+     * idTag is already on an active session on this device. Excluding
+     * a connector lets startSession run this check before attaching
+     * the new session — though we run it before any state change so
+     * the exclusion isn't strictly needed today.
+     */
+    private isIdTagAlreadyActive(idTag: string, exceptConnectorId?: number): boolean {
+        if (!idTag) return false;
+        for (const [id, c] of this.connectors) {
+            if (exceptConnectorId !== undefined && id === exceptConnectorId) continue;
+            if (c.idTag === idTag && c.transactionId !== null) return true;
+        }
+        return false;
+    }
+
     // ---- CSMS-initiated CALL handling ----
 
     /**
@@ -728,6 +753,11 @@ export class Simulator extends EventEmitter {
         const idTag = typeof p.idTag === 'string' ? p.idTag : '';
         const requestedConnectorId = typeof p.connectorId === 'number' ? p.connectorId : null;
         if (!idTag) return 'Rejected';
+
+        // §5.5 ConcurrentTx: refuse before picking a connector. A CSMS
+        // that's tracking idTag → tx mapping shouldn't be able to
+        // accidentally double-charge the same user.
+        if (this.isIdTagAlreadyActive(idTag)) return 'Rejected';
 
         // Pick a connector: caller's choice if eligible, else the first
         // Available + Operative one. Reservation rule (§6.18): a Reserved
