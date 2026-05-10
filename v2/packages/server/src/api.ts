@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import {
     AcWiringSchema,
+    CONFIG_KEY_INDEX,
     DCBatteryProfileSchema,
     DEFAULT_AC_WIRING,
     DEVICE_DEFAULTS,
@@ -321,6 +322,55 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         if (!removed) return reply.code(404).send({ error: 'not found' });
         return reply.code(204).send();
     });
+
+    // ---- DEVICE OCPP CONFIG ----
+    //
+    // Mirrors what a CSMS sees through GetConfiguration / ChangeConfiguration
+    // but with extra per-key metadata (type, default, description) that
+    // makes a UI useful. Wire-shape statuses come straight from the
+    // OCPP enum: Accepted / Rejected / NotSupported / RebootRequired.
+
+    app.get<{ Params: { id: string } }>('/api/devices/:id/config', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        const oc = sim.getOcppConfig();
+        // Enrich each known key with its spec — UIs use this to choose
+        // the right input control (bool toggle, int field, csv editor)
+        // and to show the operator why a key won't accept a write.
+        const keys = oc.configurationKey.map((k) => {
+            const spec = CONFIG_KEY_INDEX.get(k.key);
+            return {
+                key: k.key,
+                value: k.value ?? '',
+                readonly: k.readonly,
+                type: spec?.type ?? 'string',
+                default: spec?.default ?? '',
+                rebootRequired: spec?.rebootRequired ?? false,
+                description: spec?.description ?? null,
+            };
+        });
+        return { keys };
+    });
+
+    const PutConfigBody = z.object({ value: z.string() });
+    app.put<{ Params: { id: string; key: string }; Body: { value: string } }>(
+        '/api/devices/:id/config/:key',
+        async (req, reply) => {
+            const body = PutConfigBody.safeParse(req.body);
+            if (!body.success) return reply.code(400).send({ error: body.error.message });
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            const status = sim.setOcppConfig(req.params.key, body.data.value);
+            // Fetch the post-write value so the client can re-render
+            // without a follow-up GET. Even on Rejected the value
+            // doesn't change, but returning it keeps the client cache
+            // honest if the UI shows a value preview.
+            const after = sim
+                .getOcppConfig([req.params.key])
+                .configurationKey.find((k) => k.key === req.params.key);
+            return { status, key: req.params.key, value: after?.value ?? body.data.value };
+        },
+    );
 
     // ---- DELETED DEVICES (admin) ----
     //
