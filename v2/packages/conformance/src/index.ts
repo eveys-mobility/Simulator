@@ -2,6 +2,7 @@ export { runConformanceCase, runConformanceSuite } from './runner.js';
 export type { ConformanceCase, ConformanceContext, CaseResult, SuiteResult } from './runner.js';
 export { CORE_CASES } from './cases/core.js';
 export { CONCURRENT_TX_CASES } from './cases/concurrent-tx.js';
+export { CONNECTION_TIMEOUT_CASES } from './cases/connection-timeout.js';
 export { SMART_CHARGING_CASES } from './cases/smart-charging.js';
 export { REMOTE_TRIGGER_CASES } from './cases/remote-trigger.js';
 export { RESERVATION_CASES } from './cases/reservation.js';
@@ -10,6 +11,7 @@ export { FIRMWARE_MANAGEMENT_CASES } from './cases/firmware-management.js';
 export { NEGATIVE_CASES } from './cases/negatives.js';
 
 import { CONCURRENT_TX_CASES } from './cases/concurrent-tx.js';
+import { CONNECTION_TIMEOUT_CASES } from './cases/connection-timeout.js';
 import { CORE_CASES } from './cases/core.js';
 import { FIRMWARE_MANAGEMENT_CASES } from './cases/firmware-management.js';
 import { LOCAL_AUTH_LIST_CASES } from './cases/local-auth-list.js';
@@ -26,6 +28,7 @@ import { SMART_CHARGING_CASES } from './cases/smart-charging.js';
 export const ALL_CASES = [
     ...CORE_CASES,
     ...CONCURRENT_TX_CASES,
+    ...CONNECTION_TIMEOUT_CASES,
     ...SMART_CHARGING_CASES,
     ...REMOTE_TRIGGER_CASES,
     ...RESERVATION_CASES,
