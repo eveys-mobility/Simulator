@@ -77,6 +77,7 @@ export const ConnectorStatusSchema = z.enum([
     'SuspendedEV',
     'SuspendedEVSE',
     'Finishing',
+    'Reserved',
     'Faulted',
     'Unavailable',
 ]);

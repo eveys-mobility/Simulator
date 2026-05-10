@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import {
+    CancelReservationReqSchema,
+    type CancelReservationStatus,
     type ChargingProfile,
     ChargingProfileSchema,
     ClearChargingProfileReqSchema,
@@ -9,6 +11,9 @@ import {
     type Device,
     GetCompositeScheduleReqSchema,
     type MeterTick,
+    type Reservation,
+    ReserveNowReqSchema,
+    type ReserveNowStatus,
     SetChargingProfileReqSchema,
     composeSchedule,
     resolveActiveLimit,
@@ -45,6 +50,13 @@ interface ConnectorState {
     /** Pending fault auto-clear timer (set when a fault was injected
      *  with `clear_after_seconds`). Cleared on manual clear or shutdown. */
     faultClearTimer: NodeJS.Timeout | null;
+    /** Active reservation (§6.18). Null means the connector is free
+     *  for any idTag. Holding a reservation flips StatusNotification
+     *  to "Reserved" and rejects RemoteStart from any other tag. */
+    reservation: Reservation | null;
+    /** One-shot timer that fires at `expiryDate` and releases the
+     *  reservation. Cleared on cancel / consume / shutdown. */
+    reservationExpiryTimer: NodeJS.Timeout | null;
 }
 
 /**
@@ -109,6 +121,8 @@ export class Simulator extends EventEmitter {
                 operative: true,
                 pluggedIn: false,
                 faultClearTimer: null,
+                reservation: null,
+                reservationExpiryTimer: null,
             });
         }
         this.config = new OcppConfig(store, device.id, numConnectors);
@@ -149,6 +163,7 @@ export class Simulator extends EventEmitter {
         for (const c of this.connectors.values()) {
             if (c.tickTimer) clearInterval(c.tickTimer);
             if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
+            if (c.reservationExpiryTimer) clearTimeout(c.reservationExpiryTimer);
         }
         this.client.stop();
     }
@@ -211,6 +226,19 @@ export class Simulator extends EventEmitter {
         if (c.transactionId) throw new Error(`connector ${connectorId} already has an active transaction`);
         if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
         if (!this.client.isOnline()) throw new Error('device offline; cannot start session');
+        // §6.18: a reserved connector only accepts the bound idTag.
+        // Any other tag must be refused — the operator's swipe stays
+        // a swipe, not a reservation hijack.
+        if (c.reservation && c.reservation.idTag !== idTag) {
+            throw new Error(
+                `connector ${connectorId} is reserved for idTag ${c.reservation.idTag}`,
+            );
+        }
+        // Matching idTag → consume the reservation. The status flip
+        // below moves us out of Reserved into Preparing/Charging.
+        if (c.reservation) {
+            this.releaseReservation(connectorId, /*restoreStatus*/ false);
+        }
         await this.setStatus(connectorId, 'Preparing');
         const res = await this.client.startTransaction({ connectorId, idTag, meterStart: 0 });
         c.transactionId = res.transactionId;
@@ -544,6 +572,12 @@ export class Simulator extends EventEmitter {
                 // feature later in the roadmap.
                 return { ok: true, result: { status: 'Accepted' } };
 
+            case 'ReserveNow':
+                return { ok: true, result: { status: await this.handleReserveNow(p) } };
+
+            case 'CancelReservation':
+                return { ok: true, result: { status: this.handleCancelReservation(p) } };
+
             case 'SetChargingProfile':
                 return { ok: true, result: { status: this.handleSetChargingProfile(p) } };
 
@@ -652,11 +686,18 @@ export class Simulator extends EventEmitter {
         if (!idTag) return 'Rejected';
 
         // Pick a connector: caller's choice if eligible, else the first
-        // Available + Operative one. Reject if none qualify.
+        // Available + Operative one. Reservation rule (§6.18): a Reserved
+        // connector is *eligible* only for the idTag that holds the
+        // reservation; any other tag is rejected. The startSession
+        // guard re-checks this on the way through and consumes the
+        // reservation when it matches.
         const candidates = requestedConnectorId !== null ? [requestedConnectorId] : [...this.connectors.keys()];
         const target = candidates.find((id) => {
             const c = this.connectors.get(id);
-            return !!c && c.operative && c.status === 'Available' && c.transactionId === null;
+            if (!c || !c.operative || c.transactionId !== null) return false;
+            if (c.status === 'Available') return true;
+            if (c.status === 'Reserved' && c.reservation?.idTag === idTag) return true;
+            return false;
         });
         if (target === undefined) return 'Rejected';
 
@@ -783,6 +824,122 @@ export class Simulator extends EventEmitter {
         // CSMS to orchestrate via RemoteStop, since UnlockConnector is
         // the rare-recovery path.
         return 'Unlocked';
+    }
+
+    /**
+     * OCPP §6.18 ReserveNow. Picks the first connector that's free and
+     * not already reserved when connectorId=0; otherwise targets the
+     * specific connector. Stores the reservation, flips status to
+     * Reserved, and arms a one-shot expiry timer.
+     */
+    private async handleReserveNow(p: Record<string, unknown>): Promise<ReserveNowStatus> {
+        const parsed = ReserveNowReqSchema.safeParse(p);
+        if (!parsed.success) return 'Rejected';
+        const req = parsed.data;
+
+        const targets =
+            req.connectorId === 0 ? [...this.connectors.keys()] : [req.connectorId];
+
+        // Filter for an eligible target. The OCPP status enum maps the
+        // *first* failing reason — so we look for one that's outright
+        // OK; if none, the status reflects why none was suitable.
+        let pickedId: number | null = null;
+        let firstReason: ReserveNowStatus | null = null;
+        for (const id of targets) {
+            const c = this.connectors.get(id);
+            if (!c) continue;
+            if (c.status === 'Faulted') {
+                if (!firstReason) firstReason = 'Faulted';
+                continue;
+            }
+            if (!c.operative || c.status === 'Unavailable') {
+                if (!firstReason) firstReason = 'Unavailable';
+                continue;
+            }
+            if (c.transactionId !== null || c.status === 'Charging' || c.status === 'Preparing' || c.status === 'Finishing') {
+                if (!firstReason) firstReason = 'Occupied';
+                continue;
+            }
+            if (c.reservation && c.reservation.reservationId !== req.reservationId) {
+                if (!firstReason) firstReason = 'Occupied';
+                continue;
+            }
+            pickedId = id;
+            break;
+        }
+
+        if (pickedId === null) {
+            return firstReason ?? 'Rejected';
+        }
+
+        const c = this.requireConnector(pickedId);
+        // Drop any previous timer; spec allows re-issuing the same
+        // reservationId to extend.
+        if (c.reservationExpiryTimer) clearTimeout(c.reservationExpiryTimer);
+
+        const expiryMs = Date.parse(req.expiryDate);
+        const reservation: Reservation = {
+            reservationId: req.reservationId,
+            connectorId: pickedId,
+            idTag: req.idTag,
+            parentIdTag: req.parentIdTag,
+            expiryMs,
+        };
+        c.reservation = reservation;
+
+        // Arm the expiry. Negative / past dates fire immediately.
+        const delay = Math.max(0, expiryMs - Date.now());
+        c.reservationExpiryTimer = setTimeout(() => {
+            void this.expireReservation(pickedId);
+        }, delay);
+
+        await this.setStatus(pickedId, 'Reserved');
+        return 'Accepted';
+    }
+
+    /**
+     * OCPP §6.4 CancelReservation. Returns Accepted when the
+     * reservationId was held by some connector and got cleared;
+     * Rejected when no connector held it.
+     */
+    private handleCancelReservation(p: Record<string, unknown>): CancelReservationStatus {
+        const parsed = CancelReservationReqSchema.safeParse(p);
+        if (!parsed.success) return 'Rejected';
+        const id = parsed.data.reservationId;
+        for (const [cid, c] of this.connectors) {
+            if (c.reservation?.reservationId === id) {
+                this.releaseReservation(cid, /*restoreStatus*/ true);
+                return 'Accepted';
+            }
+        }
+        return 'Rejected';
+    }
+
+    /** Release the reservation slot. When `restoreStatus` is true and
+     *  the connector was in Reserved, flip back to Available — this
+     *  is the cancel / expiry path. The "consumed by start_session"
+     *  path leaves status alone because the session will move it. */
+    private releaseReservation(connectorId: number, restoreStatus: boolean): void {
+        const c = this.connectors.get(connectorId);
+        if (!c) return;
+        if (c.reservationExpiryTimer) {
+            clearTimeout(c.reservationExpiryTimer);
+            c.reservationExpiryTimer = null;
+        }
+        c.reservation = null;
+        if (restoreStatus && c.status === 'Reserved') {
+            void this.setStatus(connectorId, 'Available');
+        }
+    }
+
+    private async expireReservation(connectorId: number): Promise<void> {
+        const c = this.connectors.get(connectorId);
+        if (!c?.reservation) return;
+        c.reservation = null;
+        c.reservationExpiryTimer = null;
+        if (c.status === 'Reserved') {
+            await this.setStatus(connectorId, 'Available');
+        }
     }
 
     private async handleTrigger(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected' | 'NotImplemented'> {
