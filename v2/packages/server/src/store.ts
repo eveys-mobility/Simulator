@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import type {
     AcWiring,
+    AuthorizationData,
+    AuthorizationStatus,
     BenchmarkRun,
     BenchmarkRunSummary,
     ChargingProfile,
@@ -8,6 +10,7 @@ import type {
     DCBatteryProfile,
     Device,
     DeviceType,
+    IdTagInfo,
     PhaseMode,
     Scenario,
     ScenarioStatus,
@@ -459,6 +462,135 @@ export class Store {
         return r.changes;
     }
 
+    // ---- LocalAuthListManagement ----
+
+    /** Current list version stored for the device. 0 means the CSMS
+     *  hasn't sent a list yet. */
+    getLocalListVersion(deviceId: string): number {
+        const row = this.db
+            .prepare(`SELECT list_version FROM local_auth_meta WHERE device_id = ?`)
+            .get(deviceId) as { list_version: number } | undefined;
+        return row?.list_version ?? 0;
+    }
+
+    /** Look up one idTag's verdict, if present. Used by Authorize. */
+    getLocalAuthEntry(deviceId: string, idTag: string): IdTagInfo | null {
+        const row = this.db
+            .prepare(
+                `SELECT status, expiry_date, parent_id_tag FROM local_auth_entries
+                 WHERE device_id = ? AND id_tag = ?`,
+            )
+            .get(deviceId, idTag) as
+            | { status: string; expiry_date: string | null; parent_id_tag: string | null }
+            | undefined;
+        if (!row) return null;
+        const info: IdTagInfo = { status: row.status as AuthorizationStatus };
+        if (row.expiry_date) info.expiryDate = row.expiry_date;
+        if (row.parent_id_tag) info.parentIdTag = row.parent_id_tag;
+        return info;
+    }
+
+    /** All entries for a device. Mostly for tooling — the wire path
+     *  always asks per idTag via getLocalAuthEntry. */
+    listLocalAuthEntries(deviceId: string): AuthorizationData[] {
+        const rows = this.db
+            .prepare(
+                `SELECT id_tag, status, expiry_date, parent_id_tag FROM local_auth_entries
+                 WHERE device_id = ? ORDER BY id_tag`,
+            )
+            .all(deviceId) as Array<{
+            id_tag: string;
+            status: string;
+            expiry_date: string | null;
+            parent_id_tag: string | null;
+        }>;
+        return rows.map((r) => {
+            const info: IdTagInfo = { status: r.status as AuthorizationStatus };
+            if (r.expiry_date) info.expiryDate = r.expiry_date;
+            if (r.parent_id_tag) info.parentIdTag = r.parent_id_tag;
+            return { idTag: r.id_tag, idTagInfo: info };
+        });
+    }
+
+    /**
+     * Replace the entire list (Full update). Atomic — old rows go,
+     * new rows land, version is set to whatever the CSMS supplied.
+     * Caller validates that listVersion makes sense before calling.
+     */
+    replaceLocalAuthList(deviceId: string, listVersion: number, list: AuthorizationData[]): void {
+        const tx = this.db.transaction(() => {
+            this.db
+                .prepare(`DELETE FROM local_auth_entries WHERE device_id = ?`)
+                .run(deviceId);
+            const insert = this.db.prepare(
+                `INSERT INTO local_auth_entries (device_id, id_tag, status, expiry_date, parent_id_tag)
+                 VALUES (?, ?, ?, ?, ?)`,
+            );
+            for (const entry of list) {
+                if (!entry.idTagInfo) continue; // §6.20: Full update entries must include idTagInfo
+                insert.run(
+                    deviceId,
+                    entry.idTag,
+                    entry.idTagInfo.status,
+                    entry.idTagInfo.expiryDate ?? null,
+                    entry.idTagInfo.parentIdTag ?? null,
+                );
+            }
+            this.db
+                .prepare(
+                    `INSERT INTO local_auth_meta (device_id, list_version) VALUES (?, ?)
+                     ON CONFLICT(device_id) DO UPDATE SET list_version = excluded.list_version`,
+                )
+                .run(deviceId, listVersion);
+        });
+        tx();
+    }
+
+    /**
+     * Apply a Differential update: each entry with `idTagInfo` is an
+     * upsert; each entry without is a delete. Bumps the stored
+     * version atomically.
+     */
+    applyDifferentialLocalAuth(
+        deviceId: string,
+        listVersion: number,
+        list: AuthorizationData[],
+    ): void {
+        const tx = this.db.transaction(() => {
+            const upsert = this.db.prepare(
+                `INSERT INTO local_auth_entries (device_id, id_tag, status, expiry_date, parent_id_tag)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(device_id, id_tag) DO UPDATE SET
+                   status = excluded.status,
+                   expiry_date = excluded.expiry_date,
+                   parent_id_tag = excluded.parent_id_tag`,
+            );
+            const remove = this.db.prepare(
+                `DELETE FROM local_auth_entries WHERE device_id = ? AND id_tag = ?`,
+            );
+            for (const entry of list) {
+                if (entry.idTagInfo) {
+                    upsert.run(
+                        deviceId,
+                        entry.idTag,
+                        entry.idTagInfo.status,
+                        entry.idTagInfo.expiryDate ?? null,
+                        entry.idTagInfo.parentIdTag ?? null,
+                    );
+                } else {
+                    remove.run(deviceId, entry.idTag);
+                }
+            }
+            this.db
+                .prepare(
+                    `INSERT INTO local_auth_meta (device_id, list_version) VALUES (?, ?)
+                     ON CONFLICT(device_id) DO UPDATE SET list_version = excluded.list_version`,
+                )
+                .run(deviceId, listVersion);
+        });
+        tx();
+    }
+
     /**
      * Drop every row from every table, keeping the schema in place.
      * The destructive path: used by POST /api/settings/reset. The
@@ -472,6 +604,8 @@ export class Store {
                 DELETE FROM sessions;
                 DELETE FROM device_config;
                 DELETE FROM charging_profiles;
+                DELETE FROM local_auth_entries;
+                DELETE FROM local_auth_meta;
                 DELETE FROM devices;
                 DELETE FROM app_settings;
                 DELETE FROM benchmark_runs;
@@ -726,6 +860,25 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     (db) => {
         addColumnIfMissing(db, 'devices', 'deleted_at', 'TEXT');
         db.exec(`CREATE INDEX IF NOT EXISTS devices_deleted_at ON devices(deleted_at)`);
+    },
+    // v9 — LocalAuthListManagement. One row per (device, idTag) for the
+    // entries; one row per device for the list version. Both cascade
+    // on device delete so we don't leak orphaned auth state.
+    (db) => {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS local_auth_entries (
+                device_id     TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                id_tag        TEXT NOT NULL,
+                status        TEXT NOT NULL CHECK(status IN ('Accepted','Blocked','Expired','Invalid','ConcurrentTx')),
+                expiry_date   TEXT,
+                parent_id_tag TEXT,
+                PRIMARY KEY (device_id, id_tag)
+            );
+            CREATE TABLE IF NOT EXISTS local_auth_meta (
+                device_id    TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+                list_version INTEGER NOT NULL DEFAULT 0
+            );
+        `);
     },
 ];
 

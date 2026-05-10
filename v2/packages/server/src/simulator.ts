@@ -14,7 +14,9 @@ import {
     type Reservation,
     ReserveNowReqSchema,
     type ReserveNowStatus,
+    SendLocalListReqSchema,
     SetChargingProfileReqSchema,
+    type UpdateStatus,
     composeSchedule,
     resolveActiveLimit,
     sim,
@@ -567,9 +569,11 @@ export class Simulator extends EventEmitter {
             }
 
             case 'ClearCache':
-                // No local-auth cache yet; reply Accepted so the CSMS can
-                // tick the box. The real cache lands with the LocalAuthList
-                // feature later in the roadmap.
+                // The local-auth list lives in the store; clearing it
+                // here means dropping every entry but keeping the
+                // version (the CSMS tracks that). Accepted is the
+                // OCPP wire-status either way.
+                this.store.replaceLocalAuthList(this.device.id, this.store.getLocalListVersion(this.device.id), []);
                 return { ok: true, result: { status: 'Accepted' } };
 
             case 'ReserveNow':
@@ -577,6 +581,15 @@ export class Simulator extends EventEmitter {
 
             case 'CancelReservation':
                 return { ok: true, result: { status: this.handleCancelReservation(p) } };
+
+            case 'SendLocalList':
+                return { ok: true, result: { status: this.handleSendLocalList(p) } };
+
+            case 'GetLocalListVersion':
+                return {
+                    ok: true,
+                    result: { listVersion: this.store.getLocalListVersion(this.device.id) },
+                };
 
             case 'SetChargingProfile':
                 return { ok: true, result: { status: this.handleSetChargingProfile(p) } };
@@ -702,21 +715,37 @@ export class Simulator extends EventEmitter {
         if (target === undefined) return 'Rejected';
 
         // Per OCPP §6.18, if AuthorizeRemoteTxRequests is true the device
-        // must Authorize first. We don't ship a real Authorize handler yet
-        // (LocalAuthList phase) — just honor the bit by skipping the call
-        // when false (the gateway already authorized) and warning when true.
+        // must Authorize first. The simulator now consults the local-auth
+        // list before going to the CSMS:
+        //   - LocalAuthListEnabled + LocalPreAuthorize + entry in list →
+        //     honor the locally-stored status (skip the CSMS round trip)
+        //   - anything else falls through to CSMS Authorize
         const requiresAuthorize = this.config.getBool('AuthorizeRemoteTxRequests') ?? false;
         if (requiresAuthorize) {
-            try {
-                const auth = (await this.client.call('Authorize', { idTag })) as {
-                    idTagInfo?: { status?: string };
-                };
-                // OCPP §6.18: only `Accepted` permits the start. Other
-                // statuses (Blocked / Expired / Invalid / ConcurrentTx)
-                // mean the gateway refused the tag.
-                if (auth.idTagInfo?.status !== 'Accepted') return 'Rejected';
-            } catch {
-                return 'Rejected';
+            const localEnabled = this.config.getBool('LocalAuthListEnabled') ?? true;
+            const localPre = this.config.getBool('LocalPreAuthorize') ?? false;
+            const local = localEnabled && localPre
+                ? this.store.getLocalAuthEntry(this.device.id, idTag)
+                : null;
+            if (local) {
+                // Honor expiryDate if set. An expired entry counts as
+                // Expired regardless of the stored status.
+                const expired = local.expiryDate ? Date.parse(local.expiryDate) < Date.now() : false;
+                const effective = expired ? 'Expired' : local.status;
+                if (effective !== 'Accepted') return 'Rejected';
+                // Skip the CSMS round trip — the local list is authoritative.
+            } else {
+                try {
+                    const auth = (await this.client.call('Authorize', { idTag })) as {
+                        idTagInfo?: { status?: string };
+                    };
+                    // OCPP §6.18: only `Accepted` permits the start. Other
+                    // statuses (Blocked / Expired / Invalid / ConcurrentTx)
+                    // mean the gateway refused the tag.
+                    if (auth.idTagInfo?.status !== 'Accepted') return 'Rejected';
+                } catch {
+                    return 'Rejected';
+                }
             }
         }
 
@@ -824,6 +853,38 @@ export class Simulator extends EventEmitter {
         // CSMS to orchestrate via RemoteStop, since UnlockConnector is
         // the rare-recovery path.
         return 'Unlocked';
+    }
+
+    /**
+     * OCPP §6.20 SendLocalList. Honors LocalAuthListEnabled. Full
+     * updates replace; Differential upserts/deletes per entry. Version
+     * must be strictly newer than the stored one for Differential —
+     * otherwise VersionMismatch and the CSMS should re-sync via Full.
+     */
+    private handleSendLocalList(p: Record<string, unknown>): UpdateStatus {
+        const enabled = this.config.getBool('LocalAuthListEnabled') ?? true;
+        if (!enabled) return 'NotSupported';
+
+        const parsed = SendLocalListReqSchema.safeParse(p);
+        if (!parsed.success) return 'Failed';
+        const req = parsed.data;
+        const list = req.localAuthorizationList ?? [];
+
+        const max = this.config.getNumber('LocalAuthListMaxLength') ?? 1000;
+        if (list.length > max) return 'Failed';
+
+        const current = this.store.getLocalListVersion(this.device.id);
+        if (req.updateType === 'Differential') {
+            // §6.20: Differential requires strictly newer version. The
+            // CSMS uses VersionMismatch as a re-sync signal.
+            if (req.listVersion <= current) return 'VersionMismatch';
+            this.store.applyDifferentialLocalAuth(this.device.id, req.listVersion, list);
+            return 'Accepted';
+        }
+        // Full update: replace everything. Version can be anything
+        // the CSMS sends — it's setting authority here.
+        this.store.replaceLocalAuthList(this.device.id, req.listVersion, list);
+        return 'Accepted';
     }
 
     /**
