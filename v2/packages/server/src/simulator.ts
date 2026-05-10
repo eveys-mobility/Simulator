@@ -165,6 +165,18 @@ export class Simulator extends EventEmitter {
     }
 
     /**
+     * OCPP `GetConfiguration` payload for the device. Pass `keys =
+     * undefined` to dump every key (what most operators want from a
+     * UI); a subset matches the wire semantics the CSMS uses.
+     */
+    getOcppConfig(keys?: string[]): {
+        configurationKey: { key: string; readonly: boolean; value?: string }[];
+        unknownKey: string[];
+    } {
+        return this.config.getMany(keys);
+    }
+
+    /**
      * Apply a device-edit patch to the running Simulator without
      * respawning the OCPP socket. Used for fields whose change can be
      * picked up on the next tick (phaseMode, acWiring, dcProfile,

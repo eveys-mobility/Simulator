@@ -125,6 +125,25 @@ export const api = {
             `/devices/${deviceId}/charging-profiles`,
         ),
 
+    getDeviceConfig: (deviceId: string) =>
+        http<{
+            keys: Array<{
+                key: string;
+                value: string;
+                readonly: boolean;
+                type: 'string' | 'int' | 'bool' | 'csl';
+                default: string;
+                rebootRequired: boolean;
+                description: string | null;
+            }>;
+        }>('GET', `/devices/${deviceId}/config`),
+    setDeviceConfig: (deviceId: string, key: string, value: string) =>
+        http<{
+            status: 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired';
+            key: string;
+            value: string;
+        }>('PUT', `/devices/${deviceId}/config/${encodeURIComponent(key)}`, { value }),
+
     listBenchmarkPresets: () =>
         http<Array<{ key: string; label: string; scenario: import('@ocpp-sim/core').Scenario }>>(
             'GET',
