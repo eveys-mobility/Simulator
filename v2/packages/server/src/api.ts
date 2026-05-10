@@ -914,15 +914,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     // to keep the runtime cycle from biting at module init.
 
     app.get('/api/conformance/cases', async () => {
-        const { CORE_CASES } = await import('@ocpp-sim/conformance');
+        const { ALL_CASES } = await import('@ocpp-sim/conformance');
         return {
-            cases: CORE_CASES.map((c) => ({ id: c.id, title: c.title, profile: c.profile })),
+            cases: ALL_CASES.map((c) => ({ id: c.id, title: c.title, profile: c.profile })),
         };
     });
 
     app.post('/api/conformance/run', async () => {
-        const { CORE_CASES, runConformanceSuite } = await import('@ocpp-sim/conformance');
-        return runConformanceSuite(CORE_CASES);
+        const { ALL_CASES, runConformanceSuite } = await import('@ocpp-sim/conformance');
+        return runConformanceSuite(ALL_CASES);
     });
 
     // ---- APP SETTINGS ----
