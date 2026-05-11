@@ -37,7 +37,7 @@ interface PanelSpec {
 
 /**
  * Panel ids match the ones declared in
- * `v2/observability/grafana/dashboards/ocpp-overview.json`.
+ * `observability/grafana/dashboards/ocpp-overview.json`.
  *
  * 1 Active devices  2 Online   3 Active sessions   4 WS reconnects (5m)
  * 5 CALL rate       6 p99 CALL latency
