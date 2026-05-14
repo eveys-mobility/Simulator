@@ -143,10 +143,10 @@ export class OcppClient extends EventEmitter {
     setHeartbeatIntervalSec(seconds: number): void {
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         this.heartbeatIntervalSec = clampHeartbeat(seconds, this.device.id);
-        if (this.heartbeat) {
-            clearInterval(this.heartbeat);
-            this.heartbeat = null;
-        }
+        // startHeartbeat clears the prior interval before arming the new
+        // one, so we don't have to do it here. Only re-arm if we're
+        // actually online and past Boot — otherwise let the on-open /
+        // boot-retry path arm at the right moment.
         if (this.connected && !this.bootDeferred) this.startHeartbeat();
     }
 
@@ -398,6 +398,13 @@ export class OcppClient extends EventEmitter {
     }
 
     private startHeartbeat(): void {
+        // Always clear the previous timer before arming. Node's setInterval
+        // returns a fresh handle; without clearInterval the old one keeps
+        // firing forever — so every reconnect / boot-retry / config change
+        // that lands here would add another parallel Heartbeat loop, and
+        // the rate would compound. Single-fix for "lots of heartbeats at
+        // the same time" reports.
+        if (this.heartbeat) clearInterval(this.heartbeat);
         this.heartbeat = setInterval(() => {
             this.call('Heartbeat', {}).catch((err) => this.emit('error', err));
         }, this.heartbeatIntervalSec * 1000);
