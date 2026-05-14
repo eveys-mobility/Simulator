@@ -361,9 +361,10 @@ describe('Store — sessions', () => {
         s.close();
     });
 
-    it('abortOrphanedSessions flips active rows to aborted', () => {
+    it('abortOrphanedBenchmarkSessions only touches bench_* devices', () => {
         const s = new Store(':memory:');
         s.insertDevice(sample);
+        s.insertDevice({ ...sample, id: 'bench_foo' });
         s.insertSession({
             deviceId: sample.id,
             connectorId: 1,
@@ -376,9 +377,24 @@ describe('Store — sessions', () => {
             energyWh: 0,
             peakPowerKw: 0,
         });
-        const n = s.abortOrphanedSessions();
+        s.insertSession({
+            deviceId: 'bench_foo',
+            connectorId: 1,
+            transactionId: 2,
+            idTag: 'T',
+            status: 'active',
+            startedAt: '2026-05-09T12:00:00.000Z',
+            endedAt: null,
+            endReason: null,
+            energyWh: 0,
+            peakPowerKw: 0,
+        });
+        const n = s.abortOrphanedBenchmarkSessions();
         expect(n).toBe(1);
-        expect(s.listSessions({ status: 'aborted' })).toHaveLength(1);
+        // Real-device session must survive — it'll be resumed by the
+        // Simulator constructor on next boot.
+        expect(s.listSessions({ deviceId: sample.id, status: 'active' })).toHaveLength(1);
+        expect(s.listSessions({ deviceId: 'bench_foo', status: 'aborted' })).toHaveLength(1);
         s.close();
     });
 });

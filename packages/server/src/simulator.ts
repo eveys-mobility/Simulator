@@ -196,6 +196,54 @@ export class Simulator extends EventEmitter {
         });
         this.client.on('frame', (f) => this.emit('frame', f));
         this.client.on('error', (e) => this.emit('error', e));
+
+        // OCPP 1.6 §4.7: charging sessions survive a CP restart. The
+        // sessions table has the source-of-truth row; we restore enough
+        // ConnectorState to keep metering and let the queue drain handle
+        // the CSMS-facing catch-up. (Stop / MeterValues already in the
+        // pending_messages table from before the restart will replay
+        // on first booted.)
+        this.restoreActiveSessions();
+    }
+
+    /** Re-seed in-memory connector state from sessions rows left as
+     *  `active` by a prior run. Restarts the per-connector tick so
+     *  energy continues to accumulate; any later StatusNotifications
+     *  go out on reconnect via the normal path. */
+    private restoreActiveSessions(): void {
+        const rows = this.store.listSessions({
+            deviceId: this.device.id,
+            status: 'active',
+            limit: 100,
+        });
+        for (const s of rows) {
+            const c = this.connectors.get(s.connectorId);
+            if (!c) continue;
+            // transaction_id == 0 means the row was inserted but the
+            // CALLRESULT never landed (crash mid-StartTransaction). Treat
+            // as a still-local transaction — use a fresh negative id so
+            // the queue's localTxId rebinding logic kicks in on next
+            // drain. A persisted positive id is the CSMS-assigned one.
+            const realTx = s.transactionId > 0 ? s.transactionId : null;
+            const localTx = realTx === null ? -Date.now() - s.connectorId : null;
+            c.transactionId = realTx ?? localTx;
+            c.localTransactionId = localTx;
+            c.idTag = s.idTag;
+            c.sessionRowId = s.id;
+            c.energyWh = s.energyWh;
+            c.peakPowerW = s.peakPowerKw * 1000;
+            c.startedAtMs = Date.parse(s.startedAt);
+            c.status = 'Charging';
+            c.tickTimer = setInterval(() => this.tick(s.connectorId), 1000);
+            ocppActiveSessions.inc({ device_type: this.device.type });
+            this.emit('session', {
+                type: 'restored',
+                connectorId: s.connectorId,
+                transactionId: c.transactionId,
+                idTag: s.idTag,
+                sessionRowId: s.id,
+            });
+        }
     }
 
     async start(): Promise<void> {
@@ -336,8 +384,7 @@ export class Simulator extends EventEmitter {
                 this.emit('error', err);
                 localTxId = -Date.now();
                 txId = localTxId;
-                this.store.enqueuePendingMessage(
-                    this.device.id,
+                this.enqueuePending(
                     'StartTransaction',
                     { connectorId, idTag, meterStart: 0, timestamp: startTimestamp },
                     localTxId,
@@ -346,8 +393,7 @@ export class Simulator extends EventEmitter {
         } else {
             localTxId = -Date.now();
             txId = localTxId;
-            this.store.enqueuePendingMessage(
-                this.device.id,
+            this.enqueuePending(
                 'StartTransaction',
                 { connectorId, idTag, meterStart: 0, timestamp: startTimestamp },
                 localTxId,
@@ -413,12 +459,7 @@ export class Simulator extends EventEmitter {
             } catch (err) {
                 // Real network failure mid-call: queue the stop so the
                 // next reconnect drains it instead of dropping it.
-                this.store.enqueuePendingMessage(
-                    this.device.id,
-                    'StopTransaction',
-                    stopPayload,
-                    localTxIdForQueue ?? undefined,
-                );
+                this.enqueuePending('StopTransaction', stopPayload, localTxIdForQueue ?? undefined);
                 this.emit('error', err);
             }
         } else {
@@ -429,12 +470,7 @@ export class Simulator extends EventEmitter {
             // (started offline, not yet drained) even if we're back online
             // — the StartTransaction must drain first, so the Stop has
             // to wait its turn in the queue.
-            this.store.enqueuePendingMessage(
-                this.device.id,
-                'StopTransaction',
-                stopPayload,
-                localTxIdForQueue ?? undefined,
-            );
+            this.enqueuePending('StopTransaction', stopPayload, localTxIdForQueue ?? undefined);
         }
         c.transactionId = null;
         c.localTransactionId = null;
@@ -650,6 +686,29 @@ export class Simulator extends EventEmitter {
             }
         }
     }
+
+    /** Add a transaction-related CALL to the offline queue. Caps the
+     *  per-device queue depth at OFFLINE_QUEUE_MAX (env-tunable). When
+     *  over the cap, oldest MeterValues rows are dropped first;
+     *  Start/Stop rows are never dropped (their loss would corrupt the
+     *  transaction record). */
+    private enqueuePending(action: string, payload: unknown, localTxId?: number): number {
+        const id = this.store.enqueuePendingMessage(this.device.id, action, payload, localTxId);
+        const dropped = this.store.trimPendingMessages(this.device.id, Simulator.OFFLINE_QUEUE_MAX);
+        if (dropped > 0) {
+            this.emit('queueOverflow', {
+                deviceId: this.device.id,
+                dropped,
+                kept: Simulator.OFFLINE_QUEUE_MAX,
+            });
+        }
+        return id;
+    }
+
+    private static readonly OFFLINE_QUEUE_MAX = Math.max(
+        1000,
+        Number.parseInt(process.env.OFFLINE_QUEUE_MAX ?? '10000', 10) || 10000,
+    );
 
     /**
      * Drain the offline queue. FIFO replay of StartTransaction /
@@ -1006,11 +1065,15 @@ export class Simulator extends EventEmitter {
         if (target === undefined) return 'Rejected';
 
         // Per OCPP §6.18, if AuthorizeRemoteTxRequests is true the device
-        // must Authorize first. The simulator now consults the local-auth
-        // list before going to the CSMS:
+        // must Authorize first. The simulator consults the local-auth list
+        // before going to the CSMS:
         //   - LocalAuthListEnabled + LocalPreAuthorize + entry in list →
         //     honor the locally-stored status (skip the CSMS round trip)
-        //   - anything else falls through to CSMS Authorize
+        //   - online and no local entry → CSMS Authorize
+        //   - offline and no local entry → spec-compliant fallback: per
+        //     §4.7, the CP MAY accept the start if `AllowOfflineTxForUnknownId`
+        //     is true, otherwise it MUST refuse. Either way no CSMS round
+        //     trip happens while offline.
         const requiresAuthorize = this.config.getBool('AuthorizeRemoteTxRequests') ?? false;
         if (requiresAuthorize) {
             const localEnabled = this.config.getBool('LocalAuthListEnabled') ?? true;
@@ -1025,7 +1088,7 @@ export class Simulator extends EventEmitter {
                 const effective = expired ? 'Expired' : local.status;
                 if (effective !== 'Accepted') return 'Rejected';
                 // Skip the CSMS round trip — the local list is authoritative.
-            } else {
+            } else if (this.client.isOnline()) {
                 try {
                     const auth = (await this.client.call('Authorize', { idTag })) as {
                         idTagInfo?: { status?: string };
@@ -1037,6 +1100,15 @@ export class Simulator extends EventEmitter {
                 } catch {
                     return 'Rejected';
                 }
+            } else {
+                // Offline + no local entry → §4.7 AllowOfflineTxForUnknownId
+                const allowUnknown = this.config.getBool('AllowOfflineTxForUnknownId') ?? false;
+                if (!allowUnknown) return 'Rejected';
+                // Allowed: proceed without Authorize. The CSMS will see
+                // StartTransaction with this idTag on reconnect-drain and
+                // may reject the tag retroactively via idTagInfo, which
+                // §5.16 says is informational only — the CP does not
+                // refund/reverse the local session.
             }
         }
 
@@ -1583,8 +1655,7 @@ export class Simulator extends EventEmitter {
                 .sendMeterValueRich(connectorId, c.transactionId, filtered, sampleTimestamp)
                 .catch((e) => this.emit('error', e));
         } else {
-            this.store.enqueuePendingMessage(
-                this.device.id,
+            this.enqueuePending(
                 'MeterValues',
                 {
                     connectorId,

@@ -268,12 +268,18 @@ export class Store {
         return row?.n ?? 0;
     }
 
-    abortOrphanedSessions(): number {
+    /** Mark active sessions belonging to ephemeral benchmark devices
+     *  as aborted on server start. Their owning Simulator is gone
+     *  (the bench device itself gets deleted right after), so the row
+     *  must be closed out for audit cleanliness. Real-device active
+     *  sessions are *not* touched here — they're recovered by the
+     *  Simulator constructor so charging resumes across restarts. */
+    abortOrphanedBenchmarkSessions(): number {
         const now = new Date().toISOString();
         const r = this.db
             .prepare(
                 `UPDATE sessions SET status = 'aborted', ended_at = @now, end_reason = 'server_restart'
-                 WHERE status = 'active'`,
+                 WHERE status = 'active' AND device_id LIKE 'bench_%'`,
             )
             .run({ now });
         return r.changes;
@@ -699,6 +705,29 @@ export class Store {
             .prepare(`SELECT COUNT(*) AS n FROM pending_messages WHERE device_id = ?`)
             .get(deviceId) as { n: number };
         return r.n;
+    }
+
+    /** Trim the queue for `deviceId` down to at most `keep` rows by
+     *  deleting the oldest *MeterValues* rows first. Start/Stop rows
+     *  are kept under all circumstances — losing them would corrupt
+     *  the transaction record. Returns the number of rows actually
+     *  dropped. */
+    trimPendingMessages(deviceId: string, keep: number): number {
+        const total = this.countPendingMessages(deviceId);
+        if (total <= keep) return 0;
+        const over = total - keep;
+        const r = this.db
+            .prepare(
+                `DELETE FROM pending_messages
+                 WHERE id IN (
+                     SELECT id FROM pending_messages
+                     WHERE device_id = ? AND action = 'MeterValues'
+                     ORDER BY id ASC
+                     LIMIT ?
+                 )`,
+            )
+            .run(deviceId, over);
+        return r.changes;
     }
 }
 
