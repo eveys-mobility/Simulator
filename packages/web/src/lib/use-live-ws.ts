@@ -108,9 +108,12 @@ export function useLiveWs() {
                                 kept: typeof p.kept === 'number' ? p.kept : 0,
                             });
                             // Also refresh the device row so
-                            // pendingQueueDepth catches up.
+                            // pendingQueueDepth catches up, and the
+                            // fleet rollup so the Queued counter on
+                            // the Fleet page advances live.
                             qc.invalidateQueries({ queryKey: ['devices', p.deviceId] });
                             qc.invalidateQueries({ queryKey: ['devices'] });
+                            qc.invalidateQueries({ queryKey: ['fleet-summary'] });
                         }
                         break;
                     }

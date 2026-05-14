@@ -805,12 +805,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 if (c.status !== 'Unavailable') active_connectors++;
             }
         }
+        const queue = store.countPendingMessagesAll();
         return {
             total,
             online,
             offline: total - online,
             chargingConnectors: charging,
             activeConnectors: active_connectors,
+            pendingMessages: queue.total,
+            devicesWithPending: queue.devices,
         };
     });
 

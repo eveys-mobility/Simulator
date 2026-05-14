@@ -111,6 +111,8 @@ export const api = {
             offline: number;
             chargingConnectors: number;
             activeConnectors: number;
+            pendingMessages: number;
+            devicesWithPending: number;
         }>('GET', '/fleet/summary'),
 
     fleetStartFraction: (body: { fraction: number; idTag?: string }) =>

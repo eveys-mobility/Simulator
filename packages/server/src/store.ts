@@ -707,6 +707,19 @@ export class Store {
         return r.n;
     }
 
+    /** Fleet-wide rollup: total queued rows + distinct devices with
+     *  anything in the queue. Single query so the fleet summary stays
+     *  cheap even on a 1000-device run. */
+    countPendingMessagesAll(): { total: number; devices: number } {
+        const r = this.db
+            .prepare(
+                `SELECT COUNT(*) AS total, COUNT(DISTINCT device_id) AS devices
+                 FROM pending_messages`,
+            )
+            .get() as { total: number; devices: number };
+        return { total: r.total, devices: r.devices };
+    }
+
     /** Trim the queue for `deviceId` down to at most `keep` rows by
      *  deleting the oldest *MeterValues* rows first. Start/Stop rows
      *  are kept under all circumstances — losing them would corrupt
