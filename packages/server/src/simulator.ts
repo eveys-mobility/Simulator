@@ -192,13 +192,18 @@ export class Simulator extends EventEmitter {
             // normal online traffic resumes — the CSMS needs the catch-up
             // in chronological order, and StatusNotifications after Boot
             // can otherwise interleave with backfilled transaction data.
-            // Mark drainInFlight so a concurrent enqueue doesn't trigger
-            // a second pass; clear once handleOnline completes.
+            // Mark drainInFlight so concurrent enqueues don't kick a
+            // parallel pass; they set drainRetrigger instead and we
+            // pick them up after handleOnline finishes.
             this.drainInFlight = true;
             void this.drainPendingMessages()
                 .then(() => this.handleOnline())
                 .finally(() => {
                     this.drainInFlight = false;
+                    if (this.drainRetrigger) {
+                        this.drainRetrigger = false;
+                        if (this.client.isOnline()) this.scheduleDrain();
+                    }
                 });
         });
         this.client.on('frame', (f) => this.emit('frame', f));
@@ -375,7 +380,11 @@ export class Simulator extends EventEmitter {
         const startTimestamp = new Date().toISOString();
         let txId: number;
         let localTxId: number | null = null;
-        if (this.client.isOnline()) {
+        // While a drain is in flight the wire is reserved — interleaving
+        // a live StartTransaction with a buffer replay would put events
+        // on the wire in the wrong logical order. Queue instead; the
+        // drain will pick this row up in FIFO order with the rest.
+        if (this.client.isOnline() && !this.drainInFlight) {
             try {
                 const res = await this.client.startTransaction({
                     connectorId,
@@ -461,7 +470,8 @@ export class Simulator extends EventEmitter {
         // it once StartTransaction.conf returns the real id.
         const localTxIdForQueue = c.localTransactionId;
         let queued = false;
-        if (this.client.isOnline() && c.localTransactionId === null) {
+        // Same as startSession: don't interleave with an active drain.
+        if (this.client.isOnline() && c.localTransactionId === null && !this.drainInFlight) {
             try {
                 await this.client.stopTransaction({
                     transactionId: tx,
@@ -736,16 +746,28 @@ export class Simulator extends EventEmitter {
 
     /** Single-flight drain trigger. Multiple enqueues in the same tick
      *  collapse into one drain pass; the drain itself is FIFO and idempotent
-     *  per-row (each successful send deletes its row before the next). */
+     *  per-row (each successful send deletes its row before the next).
+     *  If a new row is enqueued while a drain is already running, we set
+     *  `drainRetrigger=true` so the drain's `.finally` kicks one more
+     *  pass — otherwise rows that landed mid-pass would wait for the
+     *  next external trigger. */
     private drainInFlight = false;
+    private drainRetrigger = false;
     private scheduleDrain(): void {
-        if (this.drainInFlight) return;
+        if (this.drainInFlight) {
+            this.drainRetrigger = true;
+            return;
+        }
         this.drainInFlight = true;
         // Defer to the next microtask so the caller's await completes
         // first — keeps the cause-and-effect ordering simple for tests.
         queueMicrotask(() => {
             void this.drainPendingMessages().finally(() => {
                 this.drainInFlight = false;
+                if (this.drainRetrigger) {
+                    this.drainRetrigger = false;
+                    if (this.client.isOnline()) this.scheduleDrain();
+                }
             });
         });
     }
@@ -1703,8 +1725,10 @@ export class Simulator extends EventEmitter {
         // Buffer MeterValues into the queue too (tagged with localTxId
         // so the drain can rewrite the transactionId once it knows the
         // real one) — otherwise we'd send MeterValues referencing a
-        // transactionId the CSMS has never seen.
-        if (this.client.isOnline() && c.localTransactionId === null) {
+        // transactionId the CSMS has never seen. Same shape if a drain
+        // is currently in flight: the wire is serialized through the
+        // drain so live MeterValues take their place in line.
+        if (this.client.isOnline() && c.localTransactionId === null && !this.drainInFlight) {
             this.client
                 .sendMeterValueRich(connectorId, c.transactionId, filtered, sampleTimestamp)
                 .catch((e) => this.emit('error', e));
