@@ -20,6 +20,7 @@ export function useLiveWs() {
     const setBenchmarkProgress = useLiveStore((s) => s.setBenchmarkProgress);
     const evictMissing = useLiveStore((s) => s.evictMissing);
     const recordCoalescedDrop = useLiveStore((s) => s.recordCoalescedDrop);
+    const recordQueueOverflow = useLiveStore((s) => s.recordQueueOverflow);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -94,6 +95,25 @@ export function useLiveWs() {
                         qc.invalidateQueries({ queryKey: ['benchmark-runs'] });
                         break;
                     }
+                    case 'queue-overflow': {
+                        const p = msg.payload as {
+                            deviceId?: string;
+                            dropped?: number;
+                            kept?: number;
+                        };
+                        if (typeof p?.deviceId === 'string' && typeof p?.dropped === 'number') {
+                            recordQueueOverflow({
+                                deviceId: p.deviceId,
+                                dropped: p.dropped,
+                                kept: typeof p.kept === 'number' ? p.kept : 0,
+                            });
+                            // Also refresh the device row so
+                            // pendingQueueDepth catches up.
+                            qc.invalidateQueries({ queryKey: ['devices', p.deviceId] });
+                            qc.invalidateQueries({ queryKey: ['devices'] });
+                        }
+                        break;
+                    }
                     case 'frames-coalesced': {
                         // Server-side hint that the broadcast hub
                         // dropped repetitive MeterValues/Heartbeat
@@ -149,5 +169,5 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, qc]);
+    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, recordQueueOverflow, qc]);
 }

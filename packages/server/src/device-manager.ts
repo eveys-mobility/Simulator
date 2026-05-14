@@ -53,6 +53,7 @@ export class DeviceManager extends EventEmitter {
         sim.on('tick', (t) => this.emit('tick', t));
         sim.on('session', (s) => this.emit('session', { deviceId: device.id, ...s }));
         sim.on('frame', (f) => this.emit('frame', { deviceId: device.id, ...f }));
+        sim.on('queueOverflow', (e) => this.emit('queueOverflow', e));
         sim.on('error', (e) => this.emit('errored', { deviceId: device.id, error: e }));
         this.sims.set(device.id, sim);
         this.syncDeviceGauge();

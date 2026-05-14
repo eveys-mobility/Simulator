@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Inbox, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +28,7 @@ export function DeviceDetailPage() {
     const onlineMap = useLiveStore((s) => s.online);
     const connectorStatusMap = useLiveStore((s) => s.connectorStatus);
     const tickMap = useLiveStore((s) => s.tick);
+    const queueOverflowMap = useLiveStore((s) => s.queueOverflow);
 
     const startSession = useMutation({
         mutationFn: (connectorId: number) => api.startSession(id, connectorId),
@@ -56,6 +57,11 @@ export function DeviceDetailPage() {
     if (!device) return <p className="text-muted-foreground">Device not found.</p>;
 
     const online = onlineMap.get(device.id) ?? device.online;
+    const queueDepth = device.pendingQueueDepth ?? 0;
+    const overflow = queueOverflowMap.get(device.id);
+    // Show the overflow indicator for ~30s after the last drop so the
+    // operator can notice without it persisting forever.
+    const overflowRecent = overflow ? Date.now() - overflow.lastAt < 30_000 : false;
 
     return (
         <div className="space-y-6">
@@ -73,6 +79,26 @@ export function DeviceDetailPage() {
                             <LiveDot pulse={online} tone={online ? 'green' : 'gray'} />
                             {online ? 'Online' : 'Offline'}
                         </Badge>
+                        {queueDepth > 0 && (
+                            <Badge
+                                variant="outline"
+                                className="gap-1.5"
+                                title={`${queueDepth} transaction frame${queueDepth === 1 ? '' : 's'} buffered while offline — drains on reconnect`}
+                            >
+                                <Inbox className="h-3 w-3" />
+                                Queued {queueDepth}
+                            </Badge>
+                        )}
+                        {overflowRecent && overflow && (
+                            <Badge
+                                variant="destructive"
+                                className="gap-1.5"
+                                title={`Offline queue hit cap (${overflow.kept}); dropped ${overflow.total} oldest MeterValues row${overflow.total === 1 ? '' : 's'}`}
+                            >
+                                <AlertTriangle className="h-3 w-3" />
+                                Overflow {overflow.lastDropped}
+                            </Badge>
+                        )}
                     </div>
                     <p className="font-mono text-xs text-muted-foreground">{device.id}</p>
                 </div>

@@ -117,7 +117,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     app.get('/api/devices', async () => {
         const devices = store.listDevices();
-        return devices.map((d) => withRuntime(d, manager));
+        return devices.map((d) => withRuntime(d, manager, store));
     });
 
     /** Build a fully-defaulted Device row from a partial spec. Used by
@@ -160,7 +160,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         const device = buildDevice(body.data);
         store.insertDevice(device);
         await manager.spawn(device);
-        return withRuntime(device, manager);
+        return withRuntime(device, manager, store);
     });
 
     // ---- BULK DEVICE CREATE ----
@@ -197,13 +197,13 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 await new Promise((r) => setTimeout(r, body.data.staggerMs));
             }
         }
-        return { created: created.length, devices: created.map((d) => withRuntime(d, manager)) };
+        return { created: created.length, devices: created.map((d) => withRuntime(d, manager, store)) };
     });
 
     app.get<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
         const d = store.getDevice(req.params.id);
         if (!d) return reply.code(404).send({ error: 'not found' });
-        return withRuntime(d, manager);
+        return withRuntime(d, manager, store);
     });
 
     const PatchDeviceBody = z.object({
@@ -310,7 +310,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 dcProfile: merged.dcProfile,
             });
         }
-        return withRuntime(merged, manager);
+        return withRuntime(merged, manager, store);
     });
 
     app.delete<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
@@ -418,7 +418,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         // is idempotent — if something raced and the sim is already
         // present, this is a no-op.
         await manager.spawn(restored);
-        return withRuntime(restored, manager);
+        return withRuntime(restored, manager, store);
     });
 
     app.delete<{ Params: { id: string }; Querystring: { confirm?: string } }>(
@@ -856,7 +856,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             };
             send({
                 type: 'hello',
-                devices: store.listDevices().map((d) => withRuntime(d, manager)),
+                devices: store.listDevices().map((d) => withRuntime(d, manager, store)),
             });
 
             // Per-connection coalescing buffers. Flushed on a 100ms
@@ -927,12 +927,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 }
             };
 
+            const onQueueOverflow = (e: unknown) => send({ type: 'queue-overflow', payload: e });
             const onBenchmarkProgress = (e: unknown) => send({ type: 'benchmark', payload: e });
             const onBenchmarkDone = (e: unknown) => send({ type: 'benchmark-done', payload: e });
             manager.on('state', onState);
             manager.on('tick', onTick);
             manager.on('session', onSession);
             manager.on('frame', onFrame);
+            manager.on('queueOverflow', onQueueOverflow);
             benchmarkBus.on('progress', onBenchmarkProgress);
             benchmarkBus.on('done', onBenchmarkDone);
             socket.on('close', () => {
@@ -941,6 +943,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 manager.off('tick', onTick);
                 manager.off('session', onSession);
                 manager.off('frame', onFrame);
+                manager.off('queueOverflow', onQueueOverflow);
                 benchmarkBus.off('progress', onBenchmarkProgress);
                 benchmarkBus.off('done', onBenchmarkDone);
             });
@@ -1110,7 +1113,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     return app;
 }
 
-function withRuntime(d: Device, mgr: DeviceManager) {
+function withRuntime(d: Device, mgr: DeviceManager, store: Store) {
     const sim = mgr.get(d.id);
     const snap = sim?.snapshot();
     // Strip authPassword from the wire response — it's a shared secret.
@@ -1121,6 +1124,7 @@ function withRuntime(d: Device, mgr: DeviceManager) {
         hasAuthPassword: Boolean(authPassword),
         online: snap?.online ?? false,
         connectors: snap?.connectors ?? defaultConnectors(d),
+        pendingQueueDepth: store.countPendingMessages(d.id),
     };
 }
 

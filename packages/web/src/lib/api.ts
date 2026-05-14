@@ -6,6 +6,10 @@ export interface DeviceWithRuntime extends Device {
     connectors: Pick<Connector, 'id' | 'status'>[] & { transactionId?: number | null }[];
     /** Backend strips the actual password; only this presence flag is sent. */
     hasAuthPassword?: boolean;
+    /** Rows currently in the offline pending_messages queue for this
+     *  device. Non-zero means buffered transaction traffic is waiting
+     *  for the next reconnect to drain. */
+    pendingQueueDepth?: number;
 }
 
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
