@@ -192,7 +192,14 @@ export class Simulator extends EventEmitter {
             // normal online traffic resumes — the CSMS needs the catch-up
             // in chronological order, and StatusNotifications after Boot
             // can otherwise interleave with backfilled transaction data.
-            void this.drainPendingMessages().then(() => this.handleOnline());
+            // Mark drainInFlight so a concurrent enqueue doesn't trigger
+            // a second pass; clear once handleOnline completes.
+            this.drainInFlight = true;
+            void this.drainPendingMessages()
+                .then(() => this.handleOnline())
+                .finally(() => {
+                    this.drainInFlight = false;
+                });
         });
         this.client.on('frame', (f) => this.emit('frame', f));
         this.client.on('error', (e) => this.emit('error', e));
@@ -417,6 +424,12 @@ export class Simulator extends EventEmitter {
         sessionRowId: number;
         energyWh: number;
         peakPowerKw: number;
+        /** True when the StopTransaction was buffered to the offline
+         *  queue instead of being sent on the wire. The CSMS will see
+         *  it on the next successful drain. UI surfaces this so the
+         *  operator isn't surprised by a Stop that didn't appear in
+         *  the trace. */
+        queued: boolean;
     }> {
         const c = this.requireConnector(connectorId);
         if (!c.transactionId || c.sessionRowId === null) {
@@ -447,6 +460,7 @@ export class Simulator extends EventEmitter {
         // queueing must tag the row with localTxId so the drain rewrites
         // it once StartTransaction.conf returns the real id.
         const localTxIdForQueue = c.localTransactionId;
+        let queued = false;
         if (this.client.isOnline() && c.localTransactionId === null) {
             try {
                 await this.client.stopTransaction({
@@ -460,6 +474,7 @@ export class Simulator extends EventEmitter {
                 // Real network failure mid-call: queue the stop so the
                 // next reconnect drains it instead of dropping it.
                 this.enqueuePending('StopTransaction', stopPayload, localTxIdForQueue ?? undefined);
+                queued = true;
                 this.emit('error', err);
             }
         } else {
@@ -471,6 +486,7 @@ export class Simulator extends EventEmitter {
             // — the StartTransaction must drain first, so the Stop has
             // to wait its turn in the queue.
             this.enqueuePending('StopTransaction', stopPayload, localTxIdForQueue ?? undefined);
+            queued = true;
         }
         c.transactionId = null;
         c.localTransactionId = null;
@@ -479,8 +495,17 @@ export class Simulator extends EventEmitter {
         c.energyWh = 0;
         c.peakPowerW = 0;
         await this.setStatus(connectorId, 'Available');
-        this.emit('session', { type: 'stopped', connectorId, transactionId: tx, sessionRowId, energyWh, peakPowerKw, reason });
-        return { sessionRowId, energyWh, peakPowerKw };
+        this.emit('session', {
+            type: 'stopped',
+            connectorId,
+            transactionId: tx,
+            sessionRowId,
+            energyWh,
+            peakPowerKw,
+            reason,
+            queued,
+        });
+        return { sessionRowId, energyWh, peakPowerKw, queued };
     }
 
     // ---- Manual / physical actions ----
@@ -691,7 +716,10 @@ export class Simulator extends EventEmitter {
      *  per-device queue depth at OFFLINE_QUEUE_MAX (env-tunable). When
      *  over the cap, oldest MeterValues rows are dropped first;
      *  Start/Stop rows are never dropped (their loss would corrupt the
-     *  transaction record). */
+     *  transaction record). If the device is currently online (i.e.
+     *  the enqueue happened because of a transient send failure, not
+     *  because the WS is down), kick an opportunistic drain so the
+     *  row doesn't sit there waiting for the next reconnect. */
     private enqueuePending(action: string, payload: unknown, localTxId?: number): number {
         const id = this.store.enqueuePendingMessage(this.device.id, action, payload, localTxId);
         const dropped = this.store.trimPendingMessages(this.device.id, Simulator.OFFLINE_QUEUE_MAX);
@@ -702,7 +730,24 @@ export class Simulator extends EventEmitter {
                 kept: Simulator.OFFLINE_QUEUE_MAX,
             });
         }
+        if (this.client.isOnline()) this.scheduleDrain();
         return id;
+    }
+
+    /** Single-flight drain trigger. Multiple enqueues in the same tick
+     *  collapse into one drain pass; the drain itself is FIFO and idempotent
+     *  per-row (each successful send deletes its row before the next). */
+    private drainInFlight = false;
+    private scheduleDrain(): void {
+        if (this.drainInFlight) return;
+        this.drainInFlight = true;
+        // Defer to the next microtask so the caller's await completes
+        // first — keeps the cause-and-effect ordering simple for tests.
+        queueMicrotask(() => {
+            void this.drainPendingMessages().finally(() => {
+                this.drainInFlight = false;
+            });
+        });
     }
 
     private static readonly OFFLINE_QUEUE_MAX = Math.max(

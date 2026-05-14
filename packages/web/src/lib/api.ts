@@ -70,7 +70,16 @@ export const api = {
     startSession: (deviceId: string, connectorId: number) =>
         http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
     stopSession: (deviceId: string, connectorId: number, reason = 'Local') =>
-        http<{ ok: true }>('POST', `/devices/${deviceId}/sessions/stop`, { connectorId, reason }),
+        http<{
+            ok: true;
+            sessionRowId: number;
+            energyWh: number;
+            peakPowerKw: number;
+            /** True when the StopTransaction landed in the offline queue
+             *  rather than going on the wire. UI uses this to flash a
+             *  notice so the operator knows it'll send on reconnect. */
+            queued: boolean;
+        }>('POST', `/devices/${deviceId}/sessions/stop`, { connectorId, reason }),
     plugIn: (deviceId: string, connectorId: number) =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/plug-in`, { connectorId }),
     plugOut: (deviceId: string, connectorId: number) =>

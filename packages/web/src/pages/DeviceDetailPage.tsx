@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, Inbox, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,11 +38,26 @@ export function DeviceDetailPage() {
             qc.invalidateQueries({ queryKey: ['sessions'] });
         },
     });
+    const [notice, setNotice] = useState<string | null>(null);
+    // Auto-dismiss notices. Cleared by the next click or after 8s.
+    useEffect(() => {
+        if (!notice) return;
+        const t = window.setTimeout(() => setNotice(null), 8000);
+        return () => window.clearTimeout(t);
+    }, [notice]);
     const stopSession = useMutation({
         mutationFn: (connectorId: number) => api.stopSession(id, connectorId),
-        onSuccess: () => {
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ['devices', id] });
             qc.invalidateQueries({ queryKey: ['sessions'] });
+            qc.invalidateQueries({ queryKey: ['device-queue', id] });
+            if (res.queued) {
+                setNotice(
+                    'Stop buffered — the StopTransaction is in the offline queue and will be sent to the CSMS on the next reconnect.',
+                );
+            } else {
+                setNotice(null);
+            }
         },
     });
     const forceDisconnect = useMutation({
@@ -128,6 +143,15 @@ export function DeviceDetailPage() {
             </div>
 
             <EditDeviceDialog device={device} open={editing} onOpenChange={setEditing} />
+
+            {notice && (
+                <div
+                    role="status"
+                    className="rounded-md border border-brand-orange/40 bg-brand-orange/10 px-3 py-2 text-sm text-foreground"
+                >
+                    {notice}
+                </div>
+            )}
 
 
             <Card>
