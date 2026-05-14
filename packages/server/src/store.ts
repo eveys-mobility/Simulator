@@ -651,10 +651,11 @@ export class Store {
         payload: unknown;
         queuedAt: string;
         localTxId: number | null;
+        attempts: number;
     }[] {
         const rows = this.db
             .prepare(
-                `SELECT id, action, payload, queued_at, local_tx_id FROM pending_messages
+                `SELECT id, action, payload, queued_at, local_tx_id, attempts FROM pending_messages
                  WHERE device_id = ? ORDER BY id`,
             )
             .all(deviceId) as Array<{
@@ -663,6 +664,7 @@ export class Store {
             payload: string;
             queued_at: string;
             local_tx_id: number | null;
+            attempts: number;
         }>;
         return rows.map((r) => ({
             id: r.id,
@@ -670,11 +672,28 @@ export class Store {
             payload: JSON.parse(r.payload),
             queuedAt: r.queued_at,
             localTxId: r.local_tx_id,
+            attempts: r.attempts,
         }));
     }
 
     deletePendingMessage(id: number): void {
         this.db.prepare(`DELETE FROM pending_messages WHERE id = ?`).run(id);
+    }
+
+    /** Increment the per-row attempt counter. Called by the drain
+     *  before each send attempt (or after a failure — doesn't matter,
+     *  bump-once-per-attempt is the contract). The persistent counter
+     *  is what prevents reconnect → drain → fail → reconnect loops:
+     *  the budget spans WS lifetimes instead of resetting each time. */
+    bumpPendingAttempts(id: number): number {
+        const r = this.db
+            .prepare(
+                `UPDATE pending_messages SET attempts = attempts + 1
+                 WHERE id = ?
+                 RETURNING attempts`,
+            )
+            .get(id) as { attempts: number } | undefined;
+        return r?.attempts ?? 0;
     }
 
     /** Rewrite `transactionId` inside the JSON payload of every queued
@@ -1049,6 +1068,15 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // rewriting).
     (db) => {
         addColumnIfMissing(db, 'pending_messages', 'local_tx_id', 'INTEGER');
+    },
+    // v12 — persistent retry counter. The drain used to track attempts
+    // in a local variable inside drainPendingMessages, which meant the
+    // budget reset on every reconnect. If the CSMS consistently rejected
+    // a queued row (e.g. MeterValues for a closed transaction), the
+    // drain would fail → close → reconnect → drain → fail forever. With
+    // this column the budget spans reconnects per OCPP §9.1's intent.
+    (db) => {
+        addColumnIfMissing(db, 'pending_messages', 'attempts', 'INTEGER NOT NULL DEFAULT 0');
     },
 ];
 

@@ -776,25 +776,34 @@ export class Simulator extends EventEmitter {
     private async drainPendingMessages(): Promise<void> {
         if (!this.client.isOnline()) return;
         const maxAttempts = Math.max(1, this.config.getNumber('TransactionMessageAttempts') ?? 3);
-        const retryIntervalSec = Math.max(
-            1,
-            this.config.getNumber('TransactionMessageRetryInterval') ?? 60,
-        );
         const rows = this.store.listPendingMessages(this.device.id);
         for (const row of rows) {
             if (!this.client.isOnline()) return;
+            // Persistent budget: rows that have already failed too many
+            // times across reconnects are dropped, not retried. Without
+            // this, a CSMS that consistently rejects a row would cause
+            // reconnect → drain → fail → CSMS-closes-WS → reconnect → …
+            // forever.
+            const nextAttempt = this.store.bumpPendingAttempts(row.id);
+            if (nextAttempt > maxAttempts) {
+                this.store.deletePendingMessage(row.id);
+                this.emit('queueDiscarded', {
+                    deviceId: this.device.id,
+                    action: row.action,
+                    attempts: nextAttempt - 1,
+                });
+                continue;
+            }
             let res: unknown;
-            let attempt = 0;
-            while (true) {
-                attempt++;
-                try {
-                    res = await this.client.callRaw(row.action, row.payload);
-                    break;
-                } catch (err) {
-                    this.emit('error', err);
-                    if (attempt >= maxAttempts || !this.client.isOnline()) return;
-                    await new Promise((r) => setTimeout(r, retryIntervalSec * 1000));
-                }
+            try {
+                res = await this.client.callRaw(row.action, row.payload);
+            } catch (err) {
+                this.emit('error', err);
+                // Don't keep hammering inside the same drain pass — let
+                // the WS reconnect path (or the next opportunistic drain)
+                // give the CSMS room to settle. Persistent attempt count
+                // already incremented above; another pass will pick it up.
+                return;
             }
             this.store.deletePendingMessage(row.id);
 
