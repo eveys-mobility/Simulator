@@ -182,7 +182,16 @@ export class Simulator extends EventEmitter {
         // must NOT send anything other than BootNotification until the
         // CSMS Accepts. The Status fan-out and live-state flip both wait
         // for 'booted' below.
-        this.client.on('offline', () => this.emit('state', { online: false }));
+        this.client.on('offline', () => {
+            // Cancel any pending drain-retry — the drain only runs while
+            // online. A fresh retry will be scheduled by the booted path
+            // if the queue is still non-empty on next connect.
+            if (this.drainRetryTimer) {
+                clearTimeout(this.drainRetryTimer);
+                this.drainRetryTimer = null;
+            }
+            this.emit('state', { online: false });
+        });
         this.client.on('booted', () => {
             // Apply any persisted heartbeat-interval override now that we're connected.
             const hb = this.config.getNumber('HeartbeatInterval');
@@ -203,6 +212,13 @@ export class Simulator extends EventEmitter {
                     if (this.drainRetrigger) {
                         this.drainRetrigger = false;
                         if (this.client.isOnline()) this.scheduleDrain();
+                        return;
+                    }
+                    if (
+                        this.client.isOnline() &&
+                        this.store.countPendingMessages(this.device.id) > 0
+                    ) {
+                        this.scheduleDrainRetry();
                     }
                 });
         });
@@ -269,6 +285,10 @@ export class Simulator extends EventEmitter {
             if (c.faultClearTimer) clearTimeout(c.faultClearTimer);
             if (c.reservationExpiryTimer) clearTimeout(c.reservationExpiryTimer);
             if (c.connectionTimeoutTimer) clearTimeout(c.connectionTimeoutTimer);
+        }
+        if (this.drainRetryTimer) {
+            clearTimeout(this.drainRetryTimer);
+            this.drainRetryTimer = null;
         }
         this.clearFirmwareTimers();
         this.clearDiagnosticsTimers();
@@ -753,6 +773,23 @@ export class Simulator extends EventEmitter {
      *  next external trigger. */
     private drainInFlight = false;
     private drainRetrigger = false;
+    /** When a drain returns with rows still queued (because a CALLERROR
+     *  forced an early return), we arm a one-shot timer to retry. The
+     *  cadence comes from TransactionMessageRetryInterval. Without this
+     *  timer, a queue with a failing row would sit until the next live
+     *  enqueue or reconnect — i.e., never make progress on its own. */
+    private drainRetryTimer: NodeJS.Timeout | null = null;
+    private scheduleDrainRetry(): void {
+        if (this.drainRetryTimer) return;
+        const retrySec = Math.max(
+            1,
+            this.config.getNumber('TransactionMessageRetryInterval') ?? 60,
+        );
+        this.drainRetryTimer = setTimeout(() => {
+            this.drainRetryTimer = null;
+            if (this.client.isOnline()) this.scheduleDrain();
+        }, retrySec * 1000);
+    }
     private scheduleDrain(): void {
         if (this.drainInFlight) {
             this.drainRetrigger = true;
@@ -767,6 +804,17 @@ export class Simulator extends EventEmitter {
                 if (this.drainRetrigger) {
                     this.drainRetrigger = false;
                     if (this.client.isOnline()) this.scheduleDrain();
+                    return;
+                }
+                // If the queue is non-empty after the drain pass (e.g.
+                // a CALLERROR forced an early return), arm a periodic
+                // retry so the queue can either drain or burn through
+                // its attempts budget without manual reconnect.
+                if (
+                    this.client.isOnline() &&
+                    this.store.countPendingMessages(this.device.id) > 0
+                ) {
+                    this.scheduleDrainRetry();
                 }
             });
         });
