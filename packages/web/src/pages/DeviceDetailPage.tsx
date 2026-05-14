@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Play, Square } from 'lucide-react';
+import { ArrowLeft, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +43,14 @@ export function DeviceDetailPage() {
             qc.invalidateQueries({ queryKey: ['sessions'] });
         },
     });
+    const forceDisconnect = useMutation({
+        mutationFn: () => api.forceDisconnect(id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['devices', id] }),
+    });
+    const reconnect = useMutation({
+        mutationFn: () => api.reconnect(id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['devices', id] }),
+    });
 
     if (isLoading) return <p className="text-muted-foreground">Loading…</p>;
     if (!device) return <p className="text-muted-foreground">Device not found.</p>;
@@ -68,6 +76,25 @@ export function DeviceDetailPage() {
                     </div>
                     <p className="font-mono text-xs text-muted-foreground">{device.id}</p>
                 </div>
+                {online ? (
+                    <Button
+                        variant="outline"
+                        onClick={() => forceDisconnect.mutate()}
+                        disabled={forceDisconnect.isPending}
+                        title="Drop the OCPP WebSocket and stay offline. Use to test the offline-queue behavior."
+                    >
+                        <Plug className="h-4 w-4" /> Disconnect
+                    </Button>
+                ) : (
+                    <Button
+                        variant="outline"
+                        onClick={() => reconnect.mutate()}
+                        disabled={reconnect.isPending}
+                        title="Reconnect to the CSMS. Any buffered transaction frames drain in order on boot."
+                    >
+                        <PlugZap className="h-4 w-4" /> Reconnect
+                    </Button>
+                )}
                 <Button variant="outline" onClick={() => setEditing(true)}>
                     <Pencil className="h-4 w-4" /> Edit
                 </Button>
@@ -118,7 +145,7 @@ export function DeviceDetailPage() {
                                     <div className="flex gap-2">
                                         <Button
                                             variant="default"
-                                            disabled={!online || charging || startSession.isPending}
+                                            disabled={!online || charging || (startSession.isPending && startSession.variables === c.id)}
                                             onClick={() => startSession.mutate(c.id)}
                                             className="flex-1"
                                         >
@@ -126,7 +153,7 @@ export function DeviceDetailPage() {
                                         </Button>
                                         <Button
                                             variant="outline"
-                                            disabled={!charging || stopSession.isPending}
+                                            disabled={!charging || (stopSession.isPending && stopSession.variables === c.id)}
                                             onClick={() => stopSession.mutate(c.id)}
                                             className="flex-1"
                                         >

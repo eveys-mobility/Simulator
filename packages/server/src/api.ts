@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { resolve as resolvePath } from 'node:path';
+import { dirname as pathDirname, resolve as resolvePath } from 'node:path';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
@@ -443,7 +443,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     const StartSessionBody = z.object({
         connectorId: z.number().int().positive(),
-        idTag: z.string().min(1).default('TEST-TAG-001'),
+        idTag: z.string().min(1).optional(),
     });
 
     app.post<{ Params: { id: string } }>('/api/devices/:id/sessions', async (req, reply) => {
@@ -453,12 +453,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         if (!sim) return reply.code(404).send({ error: 'device not found' });
         if (!sim.snapshot().online) return reply.code(409).send({ error: 'device offline' });
 
+        const idTag = body.data.idTag ?? `TEST-TAG-C${body.data.connectorId}`;
+
         // Persist the session row first so we have an id to thread through.
         const sessionRowId = store.insertSession({
             deviceId: req.params.id,
             connectorId: body.data.connectorId,
             transactionId: 0, // placeholder; updated below would require an updateSession() but we don't expose tx id at row level — keep 0 then patch via SQL if needed
-            idTag: body.data.idTag,
+            idTag,
             status: 'active',
             startedAt: new Date().toISOString(),
             endedAt: null,
@@ -467,7 +469,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             peakPowerKw: 0,
         });
         try {
-            const transactionId = await sim.startSession(body.data.connectorId, body.data.idTag, sessionRowId);
+            const transactionId = await sim.startSession(body.data.connectorId, idTag, sessionRowId);
             // Patch the placeholder transaction_id with the real one from the gateway.
             store.db
                 .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
@@ -613,6 +615,49 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             return reply.code(500).send({ error: (err as Error).message });
         }
     });
+
+    /** Operator-controlled offline mode. Distinct from a network blip:
+     *  this stays offline (auto-reconnect suppressed) until /reconnect
+     *  is called. Used to exercise the offline transaction queue. */
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/disconnect', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        sim.forceOffline();
+        return { ok: true, forcedOffline: true };
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reconnect', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        sim.goOnline();
+        return { ok: true, forcedOffline: false };
+    });
+
+    /** Download a diagnostics archive that was produced by a prior
+     *  GetDiagnostics CALL. The filename is the value the CP returned
+     *  in the CALLRESULT. Path-traversal attempts are rejected — the
+     *  filename must match the simulator's naming pattern. */
+    app.get<{ Params: { id: string; filename: string } }>(
+        '/api/devices/:id/diagnostics/:filename',
+        async (req, reply) => {
+            const { id, filename } = req.params;
+            if (!/^diagnostics-[A-Za-z0-9_-]+-\d+\.json\.gz$/.test(filename)) {
+                return reply.code(400).send({ error: 'invalid filename' });
+            }
+            const dbDir = pathDirname(resolvePath(process.env.DB_PATH ?? './data/sim.sqlite'));
+            const filePath = resolvePath(dbDir, 'diagnostics', id, filename);
+            const { stat, readFile } = await import('node:fs/promises');
+            try {
+                await stat(filePath);
+            } catch {
+                return reply.code(404).send({ error: 'not found' });
+            }
+            const body = await readFile(filePath);
+            reply.header('content-type', 'application/gzip');
+            reply.header('content-disposition', `attachment; filename="${filename}"`);
+            return reply.send(body);
+        },
+    );
 
     /**
      * List installed SmartCharging profiles for a device. Read-only;
@@ -864,10 +909,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             };
 
             const onFrame = (e: unknown) => {
-                const f = e as { deviceId?: string; action?: string };
+                const f = e as { deviceId?: string; action?: string; direction?: string };
                 const payload = { ...(e as object), at: Date.now() };
                 if (f.action && COALESCE_FRAME_ACTIONS.has(f.action) && f.deviceId) {
-                    const key = `${f.deviceId}:${f.action}`;
+                    // Key by direction too — otherwise the CSMS's CALLRESULT
+                    // (direction=in) overwrites the CP's CALL (direction=out)
+                    // within the 100ms flush window, hiding the originating
+                    // send and making it look like the CSMS spontaneously
+                    // sent Heartbeat/MeterValues.
+                    const key = `${f.deviceId}:${f.direction ?? '?'}:${f.action}`;
                     if (coalescedFrames.has(key)) {
                         droppedByDevice.set(f.deviceId, (droppedByDevice.get(f.deviceId) ?? 0) + 1);
                     }

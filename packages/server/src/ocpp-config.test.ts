@@ -25,7 +25,7 @@ const setup = () => {
 describe('OcppConfig', () => {
     it('seeds defaults on first construction', () => {
         const cfg = setup();
-        expect(cfg.get('HeartbeatInterval')).toBe('300');
+        expect(cfg.get('HeartbeatInterval')).toBe('60');
         expect(cfg.get('MeterValueSampleInterval')).toBe('60');
         expect(cfg.get('NumberOfConnectors')).toBe('1');
     });

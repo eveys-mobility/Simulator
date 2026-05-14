@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import {
     CancelReservationReqSchema,
     type CancelReservationStatus,
@@ -38,6 +41,13 @@ import type { Store } from './store.js';
 interface ConnectorState {
     status: ConnectorStatus;
     transactionId: number | null;
+    /** Negative placeholder used when the transaction started while
+     *  the WS was down — the CSMS hasn't assigned a real id yet. The
+     *  reconnect-drain rewrites `transactionId` (and every queued
+     *  MeterValues/StopTransaction row that referenced this) once the
+     *  StartTransaction CALLRESULT comes back. Null once rebound or
+     *  when the transaction started online. */
+    localTransactionId: number | null;
     sessionRowId: number | null;
     idTag: string | null;
     energyWh: number;
@@ -139,6 +149,7 @@ export class Simulator extends EventEmitter {
             this.connectors.set(id, {
                 status: 'Available',
                 transactionId: null,
+                localTransactionId: null,
                 sessionRowId: null,
                 idTag: null,
                 energyWh: 0,
@@ -177,7 +188,11 @@ export class Simulator extends EventEmitter {
             const hb = this.config.getNumber('HeartbeatInterval');
             if (hb && hb > 0) this.client.setHeartbeatIntervalSec(hb);
             this.emit('state', { online: true });
-            void this.handleOnline();
+            // Drain offline-queued StopTransaction / MeterValues BEFORE
+            // normal online traffic resumes — the CSMS needs the catch-up
+            // in chronological order, and StatusNotifications after Boot
+            // can otherwise interleave with backfilled transaction data.
+            void this.drainPendingMessages().then(() => this.handleOnline());
         });
         this.client.on('frame', (f) => this.emit('frame', f));
         this.client.on('error', (e) => this.emit('error', e));
@@ -198,6 +213,21 @@ export class Simulator extends EventEmitter {
         this.clearFirmwareTimers();
         this.clearDiagnosticsTimers();
         this.client.stop();
+    }
+
+    /** Operator-controlled offline mode. Used to exercise the offline
+     *  queue end-to-end: charging continues locally, transaction
+     *  frames buffer to SQLite, and goOnline() drains them in order. */
+    forceOffline(): void {
+        this.client.forceOffline();
+    }
+
+    goOnline(): void {
+        this.client.goOnline();
+    }
+
+    isForcedOffline(): boolean {
+        return this.client.isForcedOffline();
     }
 
     /**
@@ -257,7 +287,6 @@ export class Simulator extends EventEmitter {
         const c = this.requireConnector(connectorId);
         if (c.transactionId) throw new Error(`connector ${connectorId} already has an active transaction`);
         if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
-        if (!this.client.isOnline()) throw new Error('device offline; cannot start session');
         // §5.5 ConcurrentTx: same idTag can only be on one active
         // session per device. Catches the operator-driven path that
         // bypasses RemoteStart's pre-check.
@@ -280,8 +309,52 @@ export class Simulator extends EventEmitter {
             this.releaseReservation(connectorId, /*restoreStatus*/ false);
         }
         await this.setStatus(connectorId, 'Preparing');
-        const res = await this.client.startTransaction({ connectorId, idTag, meterStart: 0 });
-        c.transactionId = res.transactionId;
+
+        // OCPP 1.6 §4.7: if the CP can't reach the CSMS, the transaction
+        // still begins locally. We allocate a negative "local" tx id for
+        // in-memory bookkeeping, buffer StartTransaction, then walk the
+        // status. The drain on reconnect will receive the real tx id
+        // from StartTransaction.conf and rewrite every queued message
+        // that referenced the local id. The same path also catches the
+        // "online but CSMS rejected/timed out the CALL" case.
+        const startTimestamp = new Date().toISOString();
+        let txId: number;
+        let localTxId: number | null = null;
+        if (this.client.isOnline()) {
+            try {
+                const res = await this.client.startTransaction({
+                    connectorId,
+                    idTag,
+                    meterStart: 0,
+                });
+                txId = res.transactionId;
+            } catch (err) {
+                // Network blip between Preparing and StartTransaction —
+                // fall back to the offline path. Spec is the same: the
+                // transaction is locally valid, the CSMS will see it
+                // on the next drain.
+                this.emit('error', err);
+                localTxId = -Date.now();
+                txId = localTxId;
+                this.store.enqueuePendingMessage(
+                    this.device.id,
+                    'StartTransaction',
+                    { connectorId, idTag, meterStart: 0, timestamp: startTimestamp },
+                    localTxId,
+                );
+            }
+        } else {
+            localTxId = -Date.now();
+            txId = localTxId;
+            this.store.enqueuePendingMessage(
+                this.device.id,
+                'StartTransaction',
+                { connectorId, idTag, meterStart: 0, timestamp: startTimestamp },
+                localTxId,
+            );
+        }
+        c.transactionId = txId;
+        c.localTransactionId = localTxId;
         c.idTag = idTag;
         c.sessionRowId = sessionRowId;
         c.energyWh = 0;
@@ -290,8 +363,8 @@ export class Simulator extends EventEmitter {
         await this.setStatus(connectorId, 'Charging');
         c.tickTimer = setInterval(() => this.tick(connectorId), 1000);
         ocppActiveSessions.inc({ device_type: this.device.type });
-        this.emit('session', { type: 'started', connectorId, transactionId: res.transactionId, idTag, sessionRowId });
-        return res.transactionId;
+        this.emit('session', { type: 'started', connectorId, transactionId: txId, idTag, sessionRowId });
+        return txId;
     }
 
     async stopSession(connectorId: number, reason = 'Local'): Promise<{
@@ -314,18 +387,57 @@ export class Simulator extends EventEmitter {
         ocppSessionDurationSeconds.observe({ device_type: this.device.type, end_reason: reason }, durationSec);
         ocppSessionEnergyWh.observe({ device_type: this.device.type }, energyWh);
         await this.setStatus(connectorId, 'Finishing');
-        // Skip the StopTransaction CALL when offline — the CSMS isn't
-        // there to receive it, and a long-pending CALL would block the
-        // delete path. The session row still gets ended via the
-        // 'session: stopped' event so audit history stays correct.
-        if (this.client.isOnline()) {
+        // Stamp stop-time now so replay-on-reconnect carries the real
+        // moment the user unplugged, not the moment the CSMS came back.
+        const stopTimestamp = new Date().toISOString();
+        const stopPayload = {
+            transactionId: tx,
+            idTag: c.idTag ?? undefined,
+            meterStop: energyWh,
+            timestamp: stopTimestamp,
+            reason,
+        };
+        // If this transaction started offline its txId is still negative;
+        // queueing must tag the row with localTxId so the drain rewrites
+        // it once StartTransaction.conf returns the real id.
+        const localTxIdForQueue = c.localTransactionId;
+        if (this.client.isOnline() && c.localTransactionId === null) {
             try {
-                await this.client.stopTransaction({ transactionId: tx, meterStop: energyWh, reason, idTag: c.idTag ?? undefined });
+                await this.client.stopTransaction({
+                    transactionId: tx,
+                    meterStop: energyWh,
+                    reason,
+                    idTag: c.idTag ?? undefined,
+                    timestamp: stopTimestamp,
+                });
             } catch (err) {
+                // Real network failure mid-call: queue the stop so the
+                // next reconnect drains it instead of dropping it.
+                this.store.enqueuePendingMessage(
+                    this.device.id,
+                    'StopTransaction',
+                    stopPayload,
+                    localTxIdForQueue ?? undefined,
+                );
                 this.emit('error', err);
             }
+        } else {
+            // OCPP §4.7 / §5.16: the CP buffers transaction messages
+            // while offline and resends on reconnect. Without this the
+            // CSMS never sees the stop, so the transaction stays open
+            // in its books forever. Also taken when localTxId is non-null
+            // (started offline, not yet drained) even if we're back online
+            // — the StartTransaction must drain first, so the Stop has
+            // to wait its turn in the queue.
+            this.store.enqueuePendingMessage(
+                this.device.id,
+                'StopTransaction',
+                stopPayload,
+                localTxIdForQueue ?? undefined,
+            );
         }
         c.transactionId = null;
+        c.localTransactionId = null;
         c.sessionRowId = null;
         c.idTag = null;
         c.energyWh = 0;
@@ -539,6 +651,72 @@ export class Simulator extends EventEmitter {
         }
     }
 
+    /**
+     * Drain the offline queue. FIFO replay of StartTransaction /
+     * MeterValues / StopTransaction that were buffered while the WS
+     * was down. Sample-time timestamps inside each payload are
+     * preserved untouched — the CSMS sees backfilled samples stamped
+     * at when they were measured, not now.
+     *
+     * When a *StartTransaction* row drains, the CSMS returns the
+     * real transactionId in CALLRESULT. The local-temp id used while
+     * offline is then rebound: every subsequent queued row that
+     * carried the same localTxId gets its `transactionId` rewritten
+     * to the real one, and the in-memory ConnectorState (if the
+     * transaction is still active) is updated too.
+     *
+     * Each row is retried up to `TransactionMessageAttempts` times
+     * with `TransactionMessageRetryInterval` backoff before we give
+     * up and leave it for the next reconnect (OCPP 1.6 §9.1).
+     */
+    private async drainPendingMessages(): Promise<void> {
+        if (!this.client.isOnline()) return;
+        const maxAttempts = Math.max(1, this.config.getNumber('TransactionMessageAttempts') ?? 3);
+        const retryIntervalSec = Math.max(
+            1,
+            this.config.getNumber('TransactionMessageRetryInterval') ?? 60,
+        );
+        const rows = this.store.listPendingMessages(this.device.id);
+        for (const row of rows) {
+            if (!this.client.isOnline()) return;
+            let res: unknown;
+            let attempt = 0;
+            while (true) {
+                attempt++;
+                try {
+                    res = await this.client.callRaw(row.action, row.payload);
+                    break;
+                } catch (err) {
+                    this.emit('error', err);
+                    if (attempt >= maxAttempts || !this.client.isOnline()) return;
+                    await new Promise((r) => setTimeout(r, retryIntervalSec * 1000));
+                }
+            }
+            this.store.deletePendingMessage(row.id);
+
+            // Rebind: if this was a StartTransaction with a local-temp
+            // id, rewrite every other queued row that referenced it and
+            // patch the in-memory ConnectorState too.
+            if (row.action === 'StartTransaction' && row.localTxId !== null) {
+                const realTxId = (res as { transactionId?: number })?.transactionId;
+                if (typeof realTxId === 'number') {
+                    this.store.rebindPendingTxId(this.device.id, row.localTxId, realTxId);
+                    for (const c of this.connectors.values()) {
+                        if (c.localTransactionId === row.localTxId) {
+                            c.transactionId = realTxId;
+                            c.localTransactionId = null;
+                            if (c.sessionRowId !== null) {
+                                this.store.db
+                                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                                    .run(realTxId, c.sessionRowId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private async setStatus(connectorId: number, status: ConnectorStatus): Promise<void> {
         const c = this.requireConnector(connectorId);
         c.status = status;
@@ -696,6 +874,8 @@ export class Simulator extends EventEmitter {
 
             case 'GetDiagnostics':
                 return { ok: true, result: this.handleGetDiagnostics(p) };
+            // (handler kicks off the build+upload in the background;
+            // CALLRESULT goes out immediately with the filename.)
 
             case 'SetChargingProfile':
                 return { ok: true, result: { status: this.handleSetChargingProfile(p) } };
@@ -1037,35 +1217,108 @@ export class Simulator extends EventEmitter {
     }
 
     /**
-     * OCPP §6.7 GetDiagnostics. Returns a synthetic filename in the
-     * CALLRESULT and walks the upload state on its own (Uploading →
-     * Uploaded), same shape as UpdateFirmware. The synthetic name lets
-     * a CSMS verify the response payload without needing to inspect a
-     * real upload.
+     * OCPP §6.7 GetDiagnostics. Returns the upload filename immediately
+     * in the CALLRESULT, then kicks off the actual archive build off the
+     * CALL path. The archive is a gzipped JSON bundle containing the
+     * device record, OCPP config snapshot, recent sessions, and current
+     * connector state — useful debugging context, no PII. If the CSMS
+     * provided an http(s) `location`, the CP also PUTs the file there;
+     * otherwise the file just stays on disk for the operator to fetch
+     * via /api/devices/:id/diagnostics/:filename.
      */
     private handleGetDiagnostics(p: Record<string, unknown>): { fileName: string } {
         const parsed = GetDiagnosticsReqSchema.safeParse(p);
-        // Even with bad params we return a filename — the OCPP message
-        // has no error status. Validation just gates the state walk.
-        const fileName = `diagnostics-${this.device.id}-${Date.now()}.tar.gz`;
+        const fileName = `diagnostics-${this.device.id}-${Date.now()}.json.gz`;
         if (!parsed.success) return { fileName };
-
-        this.clearDiagnosticsTimers();
-        const stages: DiagnosticsStatus[] = ['Uploading', 'Uploaded'];
-        const stepMs = 50;
-        for (let i = 0; i < stages.length; i++) {
-            this.diagnosticsTimers.push(
-                setTimeout(() => {
-                    const status = stages[i];
-                    if (!status) return;
-                    this.diagnosticsStatus = status;
-                    this.client
-                        .call('DiagnosticsStatusNotification', { status })
-                        .catch(() => undefined);
-                }, (i + 1) * stepMs),
-            );
-        }
+        // Spec: CALLRESULT goes out first, then the CP walks Uploading
+        // → Uploaded via DiagnosticsStatusNotification. Run the actual
+        // build+upload off-thread so we don't hold up the response.
+        void this.runDiagnosticsUpload(fileName, parsed.data.location, parsed.data);
         return { fileName };
+    }
+
+    private async runDiagnosticsUpload(
+        fileName: string,
+        location: string,
+        req: { startTime?: string; stopTime?: string },
+    ): Promise<void> {
+        this.clearDiagnosticsTimers();
+        const sendStatus = (status: DiagnosticsStatus): void => {
+            this.diagnosticsStatus = status;
+            this.client.call('DiagnosticsStatusNotification', { status }).catch(() => undefined);
+        };
+        sendStatus('Uploading');
+
+        try {
+            const archivePath = await this.buildDiagnosticsArchive(fileName, req);
+            if (/^https?:\/\//i.test(location)) {
+                await this.putDiagnosticsArchive(archivePath, location, fileName);
+            }
+            sendStatus('Uploaded');
+        } catch (err) {
+            this.emit('error', err);
+            sendStatus('UploadFailed');
+        }
+    }
+
+    private async buildDiagnosticsArchive(
+        fileName: string,
+        req: { startTime?: string; stopTime?: string },
+    ): Promise<string> {
+        const since = req.startTime ? new Date(req.startTime).toISOString() : undefined;
+        const until = req.stopTime ? new Date(req.stopTime).toISOString() : undefined;
+        const sessions = this.store.listSessions({
+            deviceId: this.device.id,
+            ...(since ? { since } : {}),
+            ...(until ? { until } : {}),
+        });
+        const bundle = {
+            generatedAt: new Date().toISOString(),
+            simulator: { name: '@ocpp-sim/server', protocol: 'OCPP 1.6J' },
+            device: this.device,
+            ocppConfig: this.config.getMany(undefined).configurationKey,
+            connectors: Array.from(this.connectors.entries()).map(([id, c]) => ({
+                id,
+                status: c.status,
+                transactionId: c.transactionId,
+                sessionRowId: c.sessionRowId,
+                idTag: c.idTag,
+                energyWh: Math.round(c.energyWh),
+                peakPowerW: Math.round(c.peakPowerW),
+                startedAtMs: c.startedAtMs,
+                operative: c.operative,
+            })),
+            sessions,
+            diagnosticsRequest: req,
+        };
+        const gzipped = gzipSync(Buffer.from(JSON.stringify(bundle, null, 2), 'utf8'));
+        const dir = resolve(dirname(this.store.db.name), 'diagnostics', this.device.id);
+        await mkdir(dir, { recursive: true });
+        const fullPath = resolve(dir, fileName);
+        await writeFile(fullPath, gzipped);
+        return fullPath;
+    }
+
+    private async putDiagnosticsArchive(
+        archivePath: string,
+        location: string,
+        fileName: string,
+    ): Promise<void> {
+        const { readFile } = await import('node:fs/promises');
+        const body = await readFile(archivePath);
+        // Some CSMSes expect the filename appended; respect whichever
+        // the operator configured by treating a trailing slash as
+        // "append filename here". A bare URL is taken as the full
+        // target.
+        const url = location.endsWith('/') ? `${location}${fileName}` : location;
+        const res = await fetch(url, {
+            method: 'PUT',
+            body: new Uint8Array(body),
+            headers: { 'content-type': 'application/gzip' },
+        });
+        if (!res.ok) {
+            throw new Error(`diagnostics upload failed: ${res.status} ${res.statusText}`);
+        }
     }
 
     private clearDiagnosticsTimers(): void {
@@ -1314,8 +1567,32 @@ export class Simulator extends EventEmitter {
         const csv = this.config.get('MeterValuesSampledData');
         const filtered = sim.filterMeasurands(measurands, csv);
         if (filtered.length === 0) return;
-        this.client
-            .sendMeterValueRich(connectorId, c.transactionId, filtered)
-            .catch((e) => this.emit('error', e));
+        // Stamp the timestamp at sample-time, not send-time. Online, the
+        // two are within milliseconds. Offline, the payload is queued
+        // and replayed minutes-or-hours later — without sample-time the
+        // CSMS would see every backfilled sample stamped at reconnect.
+        const sampleTimestamp = new Date().toISOString();
+        // If this transaction was started offline, StartTransaction is
+        // still in the queue and the real txId hasn't been assigned yet.
+        // Buffer MeterValues into the queue too (tagged with localTxId
+        // so the drain can rewrite the transactionId once it knows the
+        // real one) — otherwise we'd send MeterValues referencing a
+        // transactionId the CSMS has never seen.
+        if (this.client.isOnline() && c.localTransactionId === null) {
+            this.client
+                .sendMeterValueRich(connectorId, c.transactionId, filtered, sampleTimestamp)
+                .catch((e) => this.emit('error', e));
+        } else {
+            this.store.enqueuePendingMessage(
+                this.device.id,
+                'MeterValues',
+                {
+                    connectorId,
+                    transactionId: c.transactionId,
+                    meterValue: [{ timestamp: sampleTimestamp, sampledValue: filtered }],
+                },
+                c.localTransactionId ?? undefined,
+            );
+        }
     }
 }

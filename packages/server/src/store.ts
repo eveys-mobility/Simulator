@@ -606,13 +606,99 @@ export class Store {
                 DELETE FROM charging_profiles;
                 DELETE FROM local_auth_entries;
                 DELETE FROM local_auth_meta;
+                DELETE FROM pending_messages;
                 DELETE FROM devices;
                 DELETE FROM app_settings;
                 DELETE FROM benchmark_runs;
-                DELETE FROM sqlite_sequence WHERE name IN ('sessions','benchmark_runs','charging_profiles');
+                DELETE FROM sqlite_sequence WHERE name IN ('sessions','benchmark_runs','charging_profiles','pending_messages');
             `);
         });
         tx();
+    }
+
+    // ---- pending messages (offline queue) ----
+
+    enqueuePendingMessage(
+        deviceId: string,
+        action: string,
+        payload: unknown,
+        localTxId?: number,
+    ): number {
+        const r = this.db
+            .prepare(
+                `INSERT INTO pending_messages (device_id, action, payload, queued_at, local_tx_id)
+                 VALUES (?, ?, ?, ?, ?)`,
+            )
+            .run(
+                deviceId,
+                action,
+                JSON.stringify(payload),
+                new Date().toISOString(),
+                localTxId ?? null,
+            );
+        return Number(r.lastInsertRowid);
+    }
+
+    listPendingMessages(deviceId: string): {
+        id: number;
+        action: string;
+        payload: unknown;
+        queuedAt: string;
+        localTxId: number | null;
+    }[] {
+        const rows = this.db
+            .prepare(
+                `SELECT id, action, payload, queued_at, local_tx_id FROM pending_messages
+                 WHERE device_id = ? ORDER BY id`,
+            )
+            .all(deviceId) as Array<{
+            id: number;
+            action: string;
+            payload: string;
+            queued_at: string;
+            local_tx_id: number | null;
+        }>;
+        return rows.map((r) => ({
+            id: r.id,
+            action: r.action,
+            payload: JSON.parse(r.payload),
+            queuedAt: r.queued_at,
+            localTxId: r.local_tx_id,
+        }));
+    }
+
+    deletePendingMessage(id: number): void {
+        this.db.prepare(`DELETE FROM pending_messages WHERE id = ?`).run(id);
+    }
+
+    /** Rewrite `transactionId` inside the JSON payload of every queued
+     *  row that still refers to the given local-temp txId, replacing
+     *  it with the CSMS-assigned real id. Used after a StartTransaction
+     *  drain returns the real id; subsequent MeterValues/StopTransaction
+     *  rows must carry that id instead of the local one. Also clears
+     *  local_tx_id so the row isn't rewritten again on a later pass. */
+    rebindPendingTxId(deviceId: string, localTxId: number, realTxId: number): void {
+        const rows = this.db
+            .prepare(
+                `SELECT id, payload FROM pending_messages
+                 WHERE device_id = ? AND local_tx_id = ?`,
+            )
+            .all(deviceId, localTxId) as Array<{ id: number; payload: string }>;
+        const update = this.db.prepare(
+            `UPDATE pending_messages SET payload = ?, local_tx_id = NULL WHERE id = ?`,
+        );
+        for (const row of rows) {
+            const obj = JSON.parse(row.payload) as Record<string, unknown>;
+            if (typeof obj.transactionId === 'number') obj.transactionId = realTxId;
+            update.run(JSON.stringify(obj), row.id);
+        }
+    }
+
+    countPendingMessages(deviceId: string): number {
+        const r = this.db
+            .prepare(`SELECT COUNT(*) AS n FROM pending_messages WHERE device_id = ?`)
+            .get(deviceId) as { n: number };
+        return r.n;
     }
 }
 
@@ -879,6 +965,35 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
                 list_version INTEGER NOT NULL DEFAULT 0
             );
         `);
+    },
+    // v10 — offline queue for transaction-related OCPP CALLs. When the
+    // CSMS is unreachable, the CP can't push MeterValues / StopTransaction
+    // in real time; OCPP §4.7 / §5.16 require buffering and replay on
+    // reconnect, with the *sample* timestamp preserved so the CSMS sees
+    // when energy was actually measured rather than when it was eventually
+    // delivered. Each row is one CALL, FIFO by id.
+    (db) => {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS pending_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                action      TEXT NOT NULL,
+                payload     TEXT NOT NULL,
+                queued_at   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS pending_messages_device ON pending_messages(device_id, id);
+        `);
+    },
+    // v11 — track which local-temp-transaction-id a queued message
+    // refers to. OCPP 1.6 §4.7: if StartTransaction itself was queued
+    // (started while offline), the CSMS only assigns the real txId on
+    // reconnect-drain. We need to rewrite the txId field inside every
+    // subsequent MeterValues/StopTransaction row that still refers to
+    // the local id. Null for rows queued *online* via a regular path
+    // (their txId is already the CSMS-assigned one and never needs
+    // rewriting).
+    (db) => {
+        addColumnIfMissing(db, 'pending_messages', 'local_tx_id', 'INTEGER');
     },
 ];
 

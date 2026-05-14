@@ -87,6 +87,10 @@ export const api = {
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/emergency-stop`),
     reboot: (deviceId: string, type: 'Soft' | 'Hard') =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/reboot`, { type }),
+    forceDisconnect: (deviceId: string) =>
+        http<{ ok: true; forcedOffline: true }>('POST', `/devices/${deviceId}/actions/disconnect`),
+    reconnect: (deviceId: string) =>
+        http<{ ok: true; forcedOffline: false }>('POST', `/devices/${deviceId}/actions/reconnect`),
 
     bulkCreateDevices: (body: {
         count: number;
