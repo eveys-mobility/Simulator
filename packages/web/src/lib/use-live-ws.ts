@@ -84,6 +84,14 @@ export function useLiveWs() {
                     case 'session': {
                         qc.invalidateQueries({ queryKey: ['sessions'] });
                         qc.invalidateQueries({ queryKey: ['devices'] });
+                        // Session events can both *add* rows to the
+                        // offline buffer (Start/Stop while WS is down)
+                        // and *drain* them (when restored on reconnect),
+                        // so refresh whichever device-queue is mounted.
+                        const sp = msg.payload as { deviceId?: string };
+                        if (typeof sp?.deviceId === 'string') {
+                            qc.invalidateQueries({ queryKey: ['device-queue', sp.deviceId] });
+                        }
                         break;
                     }
                     case 'benchmark': {
@@ -108,12 +116,16 @@ export function useLiveWs() {
                                 kept: typeof p.kept === 'number' ? p.kept : 0,
                             });
                             // Also refresh the device row so
-                            // pendingQueueDepth catches up, and the
-                            // fleet rollup so the Queued counter on
-                            // the Fleet page advances live.
+                            // pendingQueueDepth catches up, the fleet
+                            // rollup so the Queued counter on the
+                            // Fleet page advances live, and the
+                            // per-device buffer card so its row list
+                            // updates without waiting for the next
+                            // 10s poll.
                             qc.invalidateQueries({ queryKey: ['devices', p.deviceId] });
                             qc.invalidateQueries({ queryKey: ['devices'] });
                             qc.invalidateQueries({ queryKey: ['fleet-summary'] });
+                            qc.invalidateQueries({ queryKey: ['device-queue', p.deviceId] });
                         }
                         break;
                     }

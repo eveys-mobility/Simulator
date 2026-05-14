@@ -707,6 +707,19 @@ export class Store {
         return r.n;
     }
 
+    /** Drop pending rows for `deviceId`. With `action` set, only rows
+     *  whose action matches are removed (used to discard buffered
+     *  MeterValues while preserving Start/Stop). Returns the number
+     *  of rows removed. */
+    clearPendingMessages(deviceId: string, action?: string): number {
+        const r = action
+            ? this.db
+                  .prepare(`DELETE FROM pending_messages WHERE device_id = ? AND action = ?`)
+                  .run(deviceId, action)
+            : this.db.prepare(`DELETE FROM pending_messages WHERE device_id = ?`).run(deviceId);
+        return r.changes;
+    }
+
     /** Fleet-wide rollup: total queued rows + distinct devices with
      *  anything in the queue. Single query so the fleet summary stays
      *  cheap even on a 1000-device run. */

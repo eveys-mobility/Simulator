@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Inbox, LayoutGrid, List, Plus, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LiveDot } from '@/components/LiveDot';
@@ -366,10 +366,22 @@ function GridView({ devices, onlineMap, connectorStatus, onDelete, deleting }: V
                                     </div>
                                     <p className="font-mono text-xs text-muted-foreground truncate">{d.id}</p>
                                 </div>
-                                <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
-                                    <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
-                                    {online ? 'Online' : 'Offline'}
-                                </Badge>
+                                <div className="flex flex-col items-end gap-1">
+                                    <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
+                                        <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
+                                        {online ? 'Online' : 'Offline'}
+                                    </Badge>
+                                    {(d.pendingQueueDepth ?? 0) > 0 && (
+                                        <Badge
+                                            variant="outline"
+                                            className="gap-1 text-[10px] leading-tight"
+                                            title={`${d.pendingQueueDepth} transaction frame(s) buffered offline — drains on reconnect`}
+                                        >
+                                            <Inbox className="h-3 w-3" />
+                                            {d.pendingQueueDepth}
+                                        </Badge>
+                                    )}
+                                </div>
                             </CardHeader>
                             <CardContent className="space-y-3 pt-0">
                                 <ConnectorsRow device={d} connectorStatus={connectorStatus} />
@@ -441,10 +453,22 @@ function TableView({ devices, onlineMap, connectorStatus, onDelete, deleting }: 
                                     </td>
                                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{d.id}</td>
                                     <td className="px-3 py-2">
-                                        <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
-                                            <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
-                                            {online ? 'Online' : 'Offline'}
-                                        </Badge>
+                                        <div className="flex items-center gap-1.5">
+                                            <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
+                                                <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
+                                                {online ? 'Online' : 'Offline'}
+                                            </Badge>
+                                            {(d.pendingQueueDepth ?? 0) > 0 && (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="gap-1 text-[10px] leading-tight"
+                                                    title={`${d.pendingQueueDepth} buffered offline — drains on reconnect`}
+                                                >
+                                                    <Inbox className="h-3 w-3" />
+                                                    {d.pendingQueueDepth}
+                                                </Badge>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="px-3 py-2">
                                         <ConnectorsRow device={d} connectorStatus={connectorStatus} dense />

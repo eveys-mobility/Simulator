@@ -633,6 +633,39 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         return { ok: true, forcedOffline: false };
     });
 
+    /** Inspect the per-device offline buffer. Returns the rows the CP
+     *  has queued and is waiting to send on the next CSMS reconnect. */
+    app.get<{ Params: { id: string } }>('/api/devices/:id/queue', async (req, reply) => {
+        if (!store.getDevice(req.params.id)) {
+            return reply.code(404).send({ error: 'device not found' });
+        }
+        const rows = store.listPendingMessages(req.params.id);
+        return { deviceId: req.params.id, total: rows.length, rows };
+    });
+
+    /** Discard pending buffer rows for a device. Optional `?action=`
+     *  filter to drop just MeterValues while preserving Start/Stop.
+     *  Requires `?confirm=CLEAR` to guard against accidental loss
+     *  of unsent transaction data. */
+    app.delete<{ Params: { id: string }; Querystring: { confirm?: string; action?: string } }>(
+        '/api/devices/:id/queue',
+        async (req, reply) => {
+            if (!store.getDevice(req.params.id)) {
+                return reply.code(404).send({ error: 'device not found' });
+            }
+            if (req.query.confirm !== 'CLEAR') {
+                return reply.code(400).send({ error: "missing ?confirm=CLEAR" });
+            }
+            const action = req.query.action;
+            // Only allow filtering by the actions we actually queue.
+            if (action && !['MeterValues', 'StartTransaction', 'StopTransaction'].includes(action)) {
+                return reply.code(400).send({ error: 'invalid action filter' });
+            }
+            const removed = store.clearPendingMessages(req.params.id, action);
+            return { ok: true, removed };
+        },
+    );
+
     /** Download a diagnostics archive that was produced by a prior
      *  GetDiagnostics CALL. The filename is the value the CP returned
      *  in the CALLRESULT. Path-traversal attempts are rejected — the

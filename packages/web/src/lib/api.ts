@@ -95,6 +95,23 @@ export const api = {
         http<{ ok: true; forcedOffline: true }>('POST', `/devices/${deviceId}/actions/disconnect`),
     reconnect: (deviceId: string) =>
         http<{ ok: true; forcedOffline: false }>('POST', `/devices/${deviceId}/actions/reconnect`),
+    listDeviceQueue: (deviceId: string) =>
+        http<{
+            deviceId: string;
+            total: number;
+            rows: Array<{
+                id: number;
+                action: string;
+                payload: unknown;
+                queuedAt: string;
+                localTxId: number | null;
+            }>;
+        }>('GET', `/devices/${deviceId}/queue`),
+    clearDeviceQueue: (deviceId: string, opts?: { action?: 'MeterValues' | 'StartTransaction' | 'StopTransaction' }) => {
+        const qs = new URLSearchParams({ confirm: 'CLEAR' });
+        if (opts?.action) qs.set('action', opts.action);
+        return http<{ ok: true; removed: number }>('DELETE', `/devices/${deviceId}/queue?${qs.toString()}`);
+    },
 
     bulkCreateDevices: (body: {
         count: number;

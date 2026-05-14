@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BufferMemoryCard } from '@/components/BufferMemoryCard';
 import { ChargingProfiles } from '@/components/ChargingProfiles';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { LiveDot } from '@/components/LiveDot';
@@ -198,6 +199,8 @@ export function DeviceDetailPage() {
             <OcppConfigCard deviceId={device.id} />
 
             <ChargingProfiles deviceId={device.id} />
+
+            <BufferMemoryCard deviceId={device.id} />
 
             <TraceViewer deviceId={device.id} />
         </div>
