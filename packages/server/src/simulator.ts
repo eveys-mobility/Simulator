@@ -1272,10 +1272,31 @@ export class Simulator extends EventEmitter {
     }
 
     private async handleRemoteStop(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected'> {
-        const tx = typeof p.transactionId === 'number' ? p.transactionId : null;
-        if (tx === null) return 'Rejected';
-        for (const [id, c] of this.connectors.entries()) {
-            if (c.transactionId === tx) {
+        const raw = p.transactionId;
+        // Strict OCPP 1.6 path: numeric id matches a connector's tracked
+        // transactionId (real CSMS-assigned positive int, or local-only
+        // negative placeholder).
+        if (typeof raw === 'number') {
+            for (const [id, c] of this.connectors.entries()) {
+                if (c.transactionId === raw) {
+                    void this.stopSession(id, 'Remote').catch((err) => this.emit('error', err));
+                    return 'Accepted';
+                }
+            }
+            return 'Rejected';
+        }
+        // Lenient path: some CSMS implementations (notably Toger / OCPI
+        // bridge flows) carry the OCPI session_id — a UUID string — as
+        // the OCPP transactionId because their internal Transaction
+        // identifier is a UUID not an int. When the value is a non-empty
+        // string and we have exactly one active connector, stop that
+        // one. This mirrors the relaxed behaviour of mainstream real
+        // chargers and keeps Toger interop testable without forcing a
+        // sim-wide string-id refactor.
+        if (typeof raw === 'string' && raw.length > 0) {
+            const active = [...this.connectors.entries()].filter(([, c]) => c.transactionId !== null);
+            if (active.length === 1) {
+                const [id] = active[0];
                 void this.stopSession(id, 'Remote').catch((err) => this.emit('error', err));
                 return 'Accepted';
             }
