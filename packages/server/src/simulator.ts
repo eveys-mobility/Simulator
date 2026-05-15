@@ -41,6 +41,14 @@ import type { Store } from './store.js';
 interface ConnectorState {
     status: ConnectorStatus;
     transactionId: number | null;
+    /** Some CSMS (Toger / OCPI bridge) return a UUID string in
+     *  StartTransaction.conf instead of the spec-mandated integer. We
+     *  keep `transactionId` as the local integer for persistence /
+     *  queue plumbing and stash the CSMS-side string here. Outbound
+     *  MeterValues / StopTransaction prefer this when set so the CSMS
+     *  sees its own identifier echoed back. Null for spec-correct
+     *  CSMS implementations. */
+    externalTransactionId: string | null;
     /** Negative placeholder used when the transaction started while
      *  the WS was down — the CSMS hasn't assigned a real id yet. The
      *  reconnect-drain rewrites `transactionId` (and every queued
@@ -149,6 +157,7 @@ export class Simulator extends EventEmitter {
             this.connectors.set(id, {
                 status: 'Available',
                 transactionId: null,
+                externalTransactionId: null,
                 localTransactionId: null,
                 sessionRowId: null,
                 idTag: null,
@@ -400,6 +409,7 @@ export class Simulator extends EventEmitter {
         const startTimestamp = new Date().toISOString();
         let txId: number;
         let localTxId: number | null = null;
+        let externalTxId: string | null = null;
         // While a drain is in flight the wire is reserved — interleaving
         // a live StartTransaction with a buffer replay would put events
         // on the wire in the wrong logical order. Queue instead; the
@@ -411,7 +421,17 @@ export class Simulator extends EventEmitter {
                     idTag,
                     meterStart: 0,
                 });
-                txId = res.transactionId;
+                // Spec: integer. Toger / OCPI bridge: string. Use the
+                // numeric one as our local id; remember the string one
+                // so MeterValues / StopTransaction can echo it back.
+                if (typeof res.transactionId === 'number') {
+                    txId = res.transactionId;
+                } else {
+                    externalTxId = res.transactionId;
+                    // Local placeholder so persistence / queue rebinding
+                    // still works on the integer side.
+                    txId = -Date.now();
+                }
             } catch (err) {
                 // Network blip between Preparing and StartTransaction —
                 // fall back to the offline path. Spec is the same: the
@@ -436,6 +456,7 @@ export class Simulator extends EventEmitter {
             );
         }
         c.transactionId = txId;
+        c.externalTransactionId = externalTxId;
         c.localTransactionId = localTxId;
         c.idTag = idTag;
         c.sessionRowId = sessionRowId;
@@ -466,7 +487,11 @@ export class Simulator extends EventEmitter {
         }
         if (c.tickTimer) clearInterval(c.tickTimer);
         c.tickTimer = null;
-        const tx = c.transactionId;
+        // Prefer the externalTransactionId (CSMS-provided string id) on
+        // the wire when present — that's the identifier the CSMS
+        // recognises. Falls back to the local integer for spec-correct
+        // CSMS.
+        const tx: number | string = c.externalTransactionId ?? c.transactionId;
         const sessionRowId = c.sessionRowId;
         const energyWh = Math.round(c.energyWh);
         const peakPowerKw = c.peakPowerW / 1000;
@@ -1295,9 +1320,17 @@ export class Simulator extends EventEmitter {
         // sim-wide string-id refactor.
         if (typeof raw === 'string' && raw.length > 0) {
             const active = [...this.connectors.entries()].filter(([, c]) => c.transactionId !== null);
-            if (active.length === 1) {
-                const [id] = active[0];
-                void this.stopSession(id, 'Remote').catch((err) => this.emit('error', err));
+            // Also match by externalTransactionId (the CSMS-side string)
+            // when set — preferred over connector-count fallback when
+            // available because it's deterministic across multi-connector
+            // chargers.
+            const exact = active.find(([, c]) => c.externalTransactionId === raw);
+            if (exact) {
+                void this.stopSession(exact[0], 'Remote').catch((err) => this.emit('error', err));
+                return 'Accepted';
+            }
+            if (active.length === 1 && active[0]) {
+                void this.stopSession(active[0][0], 'Remote').catch((err) => this.emit('error', err));
                 return 'Accepted';
             }
         }
@@ -1798,8 +1831,11 @@ export class Simulator extends EventEmitter {
         // is currently in flight: the wire is serialized through the
         // drain so live MeterValues take their place in line.
         if (this.client.isOnline() && c.localTransactionId === null && !this.drainInFlight) {
+            // Wire the CSMS-side identifier when present (Toger / OCPI
+            // bridge uses a UUID string instead of an integer).
+            const wireTx = c.externalTransactionId ?? c.transactionId;
             this.client
-                .sendMeterValueRich(connectorId, c.transactionId, filtered, sampleTimestamp)
+                .sendMeterValueRich(connectorId, wireTx, filtered, sampleTimestamp)
                 .catch((e) => this.emit('error', e));
         } else {
             this.enqueuePending(

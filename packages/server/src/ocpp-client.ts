@@ -439,7 +439,9 @@ export class OcppClient extends EventEmitter {
     }
 
     stopTransaction(args: {
-        transactionId: number;
+        // Spec: integer. Toger / OCPI bridge: UUID string — accepted
+        // here for symmetry with StartTransactionResSchema's union.
+        transactionId: number | string;
         meterStop: number;
         reason: string;
         idTag?: string;
@@ -464,7 +466,8 @@ export class OcppClient extends EventEmitter {
      */
     sendMeterValueRich(
         connectorId: number,
-        transactionId: number,
+        // Spec: integer. Toger / OCPI bridge: string.
+        transactionId: number | string,
         sampledValue: unknown[],
         timestamp?: string,
     ): Promise<unknown> {

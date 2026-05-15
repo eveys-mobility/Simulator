@@ -154,14 +154,19 @@ export const StartTransactionReqSchema = z.object({
     reservationId: z.number().int().optional(),
 });
 
+// Spec requires integer transactionId. Some CSMS implementations (e.g.
+// Toger / OCPI bridge flows) keep their internal Transaction identifier
+// as a UUID and put it on the wire as a string. Accept either so this
+// simulator can interop with relaxed real-world CSMS without forcing
+// every Toger-style integration to refactor their identifier model.
 export const StartTransactionResSchema = z.object({
-    transactionId: z.number().int(),
+    transactionId: z.union([z.number().int(), z.string().min(1)]),
     idTagInfo: AuthorizeResSchema.shape.idTagInfo,
 });
 export type StartTransactionRes = z.infer<typeof StartTransactionResSchema>;
 
 export const StopTransactionReqSchema = z.object({
-    transactionId: z.number().int(),
+    transactionId: z.union([z.number().int(), z.string().min(1)]),
     idTag: z.string().optional(),
     meterStop: z.number().int().nonnegative(),
     timestamp: z.string().datetime(),
@@ -193,7 +198,7 @@ export const SampledValueSchema = z.object({
 
 export const MeterValueReqSchema = z.object({
     connectorId: z.number().int().positive(),
-    transactionId: z.number().int().optional(),
+    transactionId: z.union([z.number().int(), z.string().min(1)]).optional(),
     meterValue: z.array(
         z.object({
             timestamp: z.string().datetime(),
