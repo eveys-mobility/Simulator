@@ -114,7 +114,7 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         type: 'int',
         readonly: false,
         rebootRequired: false,
-        default: '300',
+        default: '60',
         description:
             'Seconds between Heartbeat messages while no other traffic is on the wire. The CSMS may override.',
     },

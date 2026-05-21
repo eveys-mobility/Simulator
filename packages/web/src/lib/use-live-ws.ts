@@ -20,6 +20,7 @@ export function useLiveWs() {
     const setBenchmarkProgress = useLiveStore((s) => s.setBenchmarkProgress);
     const evictMissing = useLiveStore((s) => s.evictMissing);
     const recordCoalescedDrop = useLiveStore((s) => s.recordCoalescedDrop);
+    const recordQueueOverflow = useLiveStore((s) => s.recordQueueOverflow);
     const qc = useQueryClient();
 
     useEffect(() => {
@@ -83,6 +84,14 @@ export function useLiveWs() {
                     case 'session': {
                         qc.invalidateQueries({ queryKey: ['sessions'] });
                         qc.invalidateQueries({ queryKey: ['devices'] });
+                        // Session events can both *add* rows to the
+                        // offline buffer (Start/Stop while WS is down)
+                        // and *drain* them (when restored on reconnect),
+                        // so refresh whichever device-queue is mounted.
+                        const sp = msg.payload as { deviceId?: string };
+                        if (typeof sp?.deviceId === 'string') {
+                            qc.invalidateQueries({ queryKey: ['device-queue', sp.deviceId] });
+                        }
                         break;
                     }
                     case 'benchmark': {
@@ -92,6 +101,32 @@ export function useLiveWs() {
                     }
                     case 'benchmark-done': {
                         qc.invalidateQueries({ queryKey: ['benchmark-runs'] });
+                        break;
+                    }
+                    case 'queue-overflow': {
+                        const p = msg.payload as {
+                            deviceId?: string;
+                            dropped?: number;
+                            kept?: number;
+                        };
+                        if (typeof p?.deviceId === 'string' && typeof p?.dropped === 'number') {
+                            recordQueueOverflow({
+                                deviceId: p.deviceId,
+                                dropped: p.dropped,
+                                kept: typeof p.kept === 'number' ? p.kept : 0,
+                            });
+                            // Also refresh the device row so
+                            // pendingQueueDepth catches up, the fleet
+                            // rollup so the Queued counter on the
+                            // Fleet page advances live, and the
+                            // per-device buffer card so its row list
+                            // updates without waiting for the next
+                            // 10s poll.
+                            qc.invalidateQueries({ queryKey: ['devices', p.deviceId] });
+                            qc.invalidateQueries({ queryKey: ['devices'] });
+                            qc.invalidateQueries({ queryKey: ['fleet-summary'] });
+                            qc.invalidateQueries({ queryKey: ['device-queue', p.deviceId] });
+                        }
                         break;
                     }
                     case 'frames-coalesced': {
@@ -149,5 +184,5 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, qc]);
+    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, recordQueueOverflow, qc]);
 }

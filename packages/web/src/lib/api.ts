@@ -6,6 +6,10 @@ export interface DeviceWithRuntime extends Device {
     connectors: Pick<Connector, 'id' | 'status'>[] & { transactionId?: number | null }[];
     /** Backend strips the actual password; only this presence flag is sent. */
     hasAuthPassword?: boolean;
+    /** Rows currently in the offline pending_messages queue for this
+     *  device. Non-zero means buffered transaction traffic is waiting
+     *  for the next reconnect to drain. */
+    pendingQueueDepth?: number;
 }
 
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -66,7 +70,16 @@ export const api = {
     startSession: (deviceId: string, connectorId: number) =>
         http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
     stopSession: (deviceId: string, connectorId: number, reason = 'Local') =>
-        http<{ ok: true }>('POST', `/devices/${deviceId}/sessions/stop`, { connectorId, reason }),
+        http<{
+            ok: true;
+            sessionRowId: number;
+            energyWh: number;
+            peakPowerKw: number;
+            /** True when the StopTransaction landed in the offline queue
+             *  rather than going on the wire. UI uses this to flash a
+             *  notice so the operator knows it'll send on reconnect. */
+            queued: boolean;
+        }>('POST', `/devices/${deviceId}/sessions/stop`, { connectorId, reason }),
     plugIn: (deviceId: string, connectorId: number) =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/plug-in`, { connectorId }),
     plugOut: (deviceId: string, connectorId: number) =>
@@ -87,6 +100,27 @@ export const api = {
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/emergency-stop`),
     reboot: (deviceId: string, type: 'Soft' | 'Hard') =>
         http<{ ok: true }>('POST', `/devices/${deviceId}/actions/reboot`, { type }),
+    forceDisconnect: (deviceId: string) =>
+        http<{ ok: true; forcedOffline: true }>('POST', `/devices/${deviceId}/actions/disconnect`),
+    reconnect: (deviceId: string) =>
+        http<{ ok: true; forcedOffline: false }>('POST', `/devices/${deviceId}/actions/reconnect`),
+    listDeviceQueue: (deviceId: string) =>
+        http<{
+            deviceId: string;
+            total: number;
+            rows: Array<{
+                id: number;
+                action: string;
+                payload: unknown;
+                queuedAt: string;
+                localTxId: number | null;
+            }>;
+        }>('GET', `/devices/${deviceId}/queue`),
+    clearDeviceQueue: (deviceId: string, opts?: { action?: 'MeterValues' | 'StartTransaction' | 'StopTransaction' }) => {
+        const qs = new URLSearchParams({ confirm: 'CLEAR' });
+        if (opts?.action) qs.set('action', opts.action);
+        return http<{ ok: true; removed: number }>('DELETE', `/devices/${deviceId}/queue?${qs.toString()}`);
+    },
 
     bulkCreateDevices: (body: {
         count: number;
@@ -103,6 +137,8 @@ export const api = {
             offline: number;
             chargingConnectors: number;
             activeConnectors: number;
+            pendingMessages: number;
+            devicesWithPending: number;
         }>('GET', '/fleet/summary'),
 
     fleetStartFraction: (body: { fraction: number; idTag?: string }) =>

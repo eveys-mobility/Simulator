@@ -97,7 +97,7 @@ describe('Store — schema migration', () => {
             expect(sessions).toHaveLength(1);
             expect(sessions[0]?.id).toBe(sessionRowId);
             // user_version returned to the latest after replay.
-            expect(s2.db.pragma('user_version', { simple: true })).toBe(9);
+            expect(s2.db.pragma('user_version', { simple: true })).toBe(12);
             s2.close();
         });
     });
@@ -361,9 +361,10 @@ describe('Store — sessions', () => {
         s.close();
     });
 
-    it('abortOrphanedSessions flips active rows to aborted', () => {
+    it('abortOrphanedBenchmarkSessions only touches bench_* devices', () => {
         const s = new Store(':memory:');
         s.insertDevice(sample);
+        s.insertDevice({ ...sample, id: 'bench_foo' });
         s.insertSession({
             deviceId: sample.id,
             connectorId: 1,
@@ -376,9 +377,98 @@ describe('Store — sessions', () => {
             energyWh: 0,
             peakPowerKw: 0,
         });
-        const n = s.abortOrphanedSessions();
+        s.insertSession({
+            deviceId: 'bench_foo',
+            connectorId: 1,
+            transactionId: 2,
+            idTag: 'T',
+            status: 'active',
+            startedAt: '2026-05-09T12:00:00.000Z',
+            endedAt: null,
+            endReason: null,
+            energyWh: 0,
+            peakPowerKw: 0,
+        });
+        const n = s.abortOrphanedBenchmarkSessions();
         expect(n).toBe(1);
-        expect(s.listSessions({ status: 'aborted' })).toHaveLength(1);
+        // Real-device session must survive — it'll be resumed by the
+        // Simulator constructor on next boot.
+        expect(s.listSessions({ deviceId: sample.id, status: 'active' })).toHaveLength(1);
+        expect(s.listSessions({ deviceId: 'bench_foo', status: 'aborted' })).toHaveLength(1);
+        s.close();
+    });
+});
+
+describe('Store — pending messages (offline queue)', () => {
+    it('bumpPendingAttempts increments and persists across reads', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        const id = s.enqueuePendingMessage(sample.id, 'MeterValues', { foo: 1 });
+        expect(s.listPendingMessages(sample.id)[0]?.attempts).toBe(0);
+        expect(s.bumpPendingAttempts(id)).toBe(1);
+        expect(s.bumpPendingAttempts(id)).toBe(2);
+        // The counter persists — listing after the bumps reflects it,
+        // which is what makes the drain budget span reconnects.
+        expect(s.listPendingMessages(sample.id)[0]?.attempts).toBe(2);
+        s.close();
+    });
+
+    it('localTxId is preserved and rebinds rewrite transactionId in place', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        const localTx = -42;
+        const startId = s.enqueuePendingMessage(
+            sample.id,
+            'StartTransaction',
+            { connectorId: 1, idTag: 'T', meterStart: 0 },
+            localTx,
+        );
+        s.enqueuePendingMessage(
+            sample.id,
+            'MeterValues',
+            { connectorId: 1, transactionId: localTx, meterValue: [] },
+            localTx,
+        );
+        s.enqueuePendingMessage(
+            sample.id,
+            'StopTransaction',
+            { transactionId: localTx, meterStop: 0, reason: 'Local', timestamp: 'x' },
+            localTx,
+        );
+        s.rebindPendingTxId(sample.id, localTx, 9001);
+        const rows = s.listPendingMessages(sample.id);
+        // StartTransaction has no transactionId in its payload — rebind
+        // only touches rows that did, and clears local_tx_id on those.
+        const mv = rows.find((r) => r.action === 'MeterValues');
+        const stop = rows.find((r) => r.action === 'StopTransaction');
+        expect((mv?.payload as { transactionId: number }).transactionId).toBe(9001);
+        expect((stop?.payload as { transactionId: number }).transactionId).toBe(9001);
+        expect(mv?.localTxId).toBeNull();
+        expect(stop?.localTxId).toBeNull();
+        // Start row itself was rebound (no transactionId field) and its
+        // localTxId cleared too.
+        const start = rows.find((r) => r.id === startId);
+        expect(start?.localTxId).toBeNull();
+        s.close();
+    });
+
+    it('trimPendingMessages drops oldest MeterValues but never Start/Stop', () => {
+        const s = new Store(':memory:');
+        s.insertDevice(sample);
+        s.enqueuePendingMessage(sample.id, 'StartTransaction', {});
+        for (let i = 0; i < 5; i++) s.enqueuePendingMessage(sample.id, 'MeterValues', { i });
+        s.enqueuePendingMessage(sample.id, 'StopTransaction', {});
+        // 7 rows total. Trim to 4 — must drop 3 oldest MeterValues, keep
+        // Start + Stop + 2 newest MeterValues.
+        const dropped = s.trimPendingMessages(sample.id, 4);
+        expect(dropped).toBe(3);
+        const rows = s.listPendingMessages(sample.id);
+        expect(rows.map((r) => r.action)).toEqual([
+            'StartTransaction',
+            'MeterValues',
+            'MeterValues',
+            'StopTransaction',
+        ]);
         s.close();
     });
 });

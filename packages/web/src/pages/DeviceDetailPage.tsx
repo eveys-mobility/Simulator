@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Play, Square } from 'lucide-react';
-import { useState } from 'react';
+import { AlertTriangle, ArrowLeft, Inbox, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BufferMemoryCard } from '@/components/BufferMemoryCard';
 import { ChargingProfiles } from '@/components/ChargingProfiles';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { LiveDot } from '@/components/LiveDot';
@@ -28,6 +29,7 @@ export function DeviceDetailPage() {
     const onlineMap = useLiveStore((s) => s.online);
     const connectorStatusMap = useLiveStore((s) => s.connectorStatus);
     const tickMap = useLiveStore((s) => s.tick);
+    const queueOverflowMap = useLiveStore((s) => s.queueOverflow);
 
     const startSession = useMutation({
         mutationFn: (connectorId: number) => api.startSession(id, connectorId),
@@ -36,18 +38,46 @@ export function DeviceDetailPage() {
             qc.invalidateQueries({ queryKey: ['sessions'] });
         },
     });
+    const [notice, setNotice] = useState<string | null>(null);
+    // Auto-dismiss notices. Cleared by the next click or after 8s.
+    useEffect(() => {
+        if (!notice) return;
+        const t = window.setTimeout(() => setNotice(null), 8000);
+        return () => window.clearTimeout(t);
+    }, [notice]);
     const stopSession = useMutation({
         mutationFn: (connectorId: number) => api.stopSession(id, connectorId),
-        onSuccess: () => {
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ['devices', id] });
             qc.invalidateQueries({ queryKey: ['sessions'] });
+            qc.invalidateQueries({ queryKey: ['device-queue', id] });
+            if (res.queued) {
+                setNotice(
+                    'Stop buffered — the StopTransaction is in the offline queue and will be sent to the CSMS on the next reconnect.',
+                );
+            } else {
+                setNotice(null);
+            }
         },
+    });
+    const forceDisconnect = useMutation({
+        mutationFn: () => api.forceDisconnect(id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['devices', id] }),
+    });
+    const reconnect = useMutation({
+        mutationFn: () => api.reconnect(id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['devices', id] }),
     });
 
     if (isLoading) return <p className="text-muted-foreground">Loading…</p>;
     if (!device) return <p className="text-muted-foreground">Device not found.</p>;
 
     const online = onlineMap.get(device.id) ?? device.online;
+    const queueDepth = device.pendingQueueDepth ?? 0;
+    const overflow = queueOverflowMap.get(device.id);
+    // Show the overflow indicator for ~30s after the last drop so the
+    // operator can notice without it persisting forever.
+    const overflowRecent = overflow ? Date.now() - overflow.lastAt < 30_000 : false;
 
     return (
         <div className="space-y-6">
@@ -65,15 +95,63 @@ export function DeviceDetailPage() {
                             <LiveDot pulse={online} tone={online ? 'green' : 'gray'} />
                             {online ? 'Online' : 'Offline'}
                         </Badge>
+                        {queueDepth > 0 && (
+                            <Badge
+                                variant="outline"
+                                className="gap-1.5"
+                                title={`${queueDepth} transaction frame${queueDepth === 1 ? '' : 's'} buffered while offline — drains on reconnect`}
+                            >
+                                <Inbox className="h-3 w-3" />
+                                Queued {queueDepth}
+                            </Badge>
+                        )}
+                        {overflowRecent && overflow && (
+                            <Badge
+                                variant="destructive"
+                                className="gap-1.5"
+                                title={`Offline queue hit cap (${overflow.kept}); dropped ${overflow.total} oldest MeterValues row${overflow.total === 1 ? '' : 's'}`}
+                            >
+                                <AlertTriangle className="h-3 w-3" />
+                                Overflow {overflow.lastDropped}
+                            </Badge>
+                        )}
                     </div>
                     <p className="font-mono text-xs text-muted-foreground">{device.id}</p>
                 </div>
+                {online ? (
+                    <Button
+                        variant="outline"
+                        onClick={() => forceDisconnect.mutate()}
+                        disabled={forceDisconnect.isPending}
+                        title="Drop the OCPP WebSocket and stay offline. Use to test the offline-queue behavior."
+                    >
+                        <Plug className="h-4 w-4" /> Disconnect
+                    </Button>
+                ) : (
+                    <Button
+                        variant="outline"
+                        onClick={() => reconnect.mutate()}
+                        disabled={reconnect.isPending}
+                        title="Reconnect to the CSMS. Any buffered transaction frames drain in order on boot."
+                    >
+                        <PlugZap className="h-4 w-4" /> Reconnect
+                    </Button>
+                )}
                 <Button variant="outline" onClick={() => setEditing(true)}>
                     <Pencil className="h-4 w-4" /> Edit
                 </Button>
             </div>
 
             <EditDeviceDialog device={device} open={editing} onOpenChange={setEditing} />
+
+            {notice && (
+                <div
+                    role="status"
+                    className="rounded-md border border-brand-orange/40 bg-brand-orange/10 px-3 py-2 text-sm text-foreground"
+                >
+                    {notice}
+                </div>
+            )}
 
 
             <Card>
@@ -118,7 +196,7 @@ export function DeviceDetailPage() {
                                     <div className="flex gap-2">
                                         <Button
                                             variant="default"
-                                            disabled={!online || charging || startSession.isPending}
+                                            disabled={!online || charging || (startSession.isPending && startSession.variables === c.id)}
                                             onClick={() => startSession.mutate(c.id)}
                                             className="flex-1"
                                         >
@@ -126,7 +204,7 @@ export function DeviceDetailPage() {
                                         </Button>
                                         <Button
                                             variant="outline"
-                                            disabled={!charging || stopSession.isPending}
+                                            disabled={!charging || (stopSession.isPending && stopSession.variables === c.id)}
                                             onClick={() => stopSession.mutate(c.id)}
                                             className="flex-1"
                                         >
@@ -145,6 +223,8 @@ export function DeviceDetailPage() {
             <OcppConfigCard deviceId={device.id} />
 
             <ChargingProfiles deviceId={device.id} />
+
+            <BufferMemoryCard deviceId={device.id} />
 
             <TraceViewer deviceId={device.id} />
         </div>

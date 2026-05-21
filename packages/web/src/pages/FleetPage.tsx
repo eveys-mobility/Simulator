@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     AlertOctagon,
+    AlertTriangle,
     Activity,
     Cpu,
+    Inbox,
     PlayCircle,
     Plus,
     RefreshCw,
     Timer,
     Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLiveStore } from '@/lib/live-store';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,6 +43,26 @@ export function FleetPage() {
         refetchInterval: 5000,
     });
 
+    // Fleet-wide overflow indicator: roll up every per-device entry the
+    // live store has accumulated. We show only events from the last
+    // 30s so the badge fades after a quiet period.
+    const queueOverflowMap = useLiveStore((s) => s.queueOverflow);
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        // Cheap re-render every 5s so the 30s freshness window decays
+        // visibly even when no new overflow lands.
+        const t = setInterval(() => setNow(Date.now()), 5000);
+        return () => clearInterval(t);
+    }, []);
+    let recentOverflowDevices = 0;
+    let recentOverflowDropped = 0;
+    for (const [, e] of queueOverflowMap) {
+        if (now - e.lastAt < 30_000) {
+            recentOverflowDevices++;
+            recentOverflowDropped += e.lastDropped;
+        }
+    }
+
     const invalidateAll = () => {
         qc.invalidateQueries({ queryKey: ['devices'] });
         qc.invalidateQueries({ queryKey: ['fleet-summary'] });
@@ -55,7 +78,7 @@ export function FleetPage() {
             </div>
 
             {/* Live counters */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <Stat
                     label="Total devices"
                     value={summary.data?.total ?? '—'}
@@ -78,7 +101,33 @@ export function FleetPage() {
                     icon={<Zap className="h-4 w-4 text-brand-orange" />}
                     accent="text-brand-orange"
                 />
+                <Stat
+                    label="Queued"
+                    value={summary.data?.pendingMessages ?? '—'}
+                    icon={<Inbox className={`h-4 w-4 ${(summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : 'text-muted-foreground'}`} />}
+                    accent={(summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : undefined}
+                    sublabel={
+                        (summary.data?.devicesWithPending ?? 0) > 0
+                            ? `on ${summary.data?.devicesWithPending} device${summary.data?.devicesWithPending === 1 ? '' : 's'}`
+                            : undefined
+                    }
+                />
             </div>
+
+            {recentOverflowDevices > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>
+                        Offline queue hit capacity on{' '}
+                        <span className="font-semibold tabular-nums">{recentOverflowDevices}</span>{' '}
+                        device{recentOverflowDevices === 1 ? '' : 's'} in the last 30s —{' '}
+                        <span className="font-semibold tabular-nums">{recentOverflowDropped}</span>{' '}
+                        MeterValues row{recentOverflowDropped === 1 ? '' : 's'} dropped. Increase{' '}
+                        <span className="font-mono">OFFLINE_QUEUE_MAX</span> or reconnect affected
+                        devices.
+                    </span>
+                </div>
+            )}
 
             <BulkCreateCard onSuccess={invalidateAll} />
             <FleetActionsCard onSuccess={invalidateAll} />
@@ -91,11 +140,13 @@ function Stat({
     value,
     icon,
     accent,
+    sublabel,
 }: {
     label: string;
     value: number | string;
     icon: React.ReactNode;
     accent?: string;
+    sublabel?: string;
 }) {
     return (
         <Card>
@@ -103,6 +154,9 @@ function Stat({
                 <div className="space-y-0.5">
                     <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
                     <div className={`text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
+                    {sublabel && (
+                        <div className="text-[10px] text-muted-foreground tabular-nums">{sublabel}</div>
+                    )}
                 </div>
                 {icon}
             </CardContent>

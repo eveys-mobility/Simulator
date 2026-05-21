@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { resolve as resolvePath } from 'node:path';
+import { dirname as pathDirname, resolve as resolvePath } from 'node:path';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
@@ -117,7 +117,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     app.get('/api/devices', async () => {
         const devices = store.listDevices();
-        return devices.map((d) => withRuntime(d, manager));
+        return devices.map((d) => withRuntime(d, manager, store));
     });
 
     /** Build a fully-defaulted Device row from a partial spec. Used by
@@ -160,7 +160,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         const device = buildDevice(body.data);
         store.insertDevice(device);
         await manager.spawn(device);
-        return withRuntime(device, manager);
+        return withRuntime(device, manager, store);
     });
 
     // ---- BULK DEVICE CREATE ----
@@ -197,13 +197,13 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 await new Promise((r) => setTimeout(r, body.data.staggerMs));
             }
         }
-        return { created: created.length, devices: created.map((d) => withRuntime(d, manager)) };
+        return { created: created.length, devices: created.map((d) => withRuntime(d, manager, store)) };
     });
 
     app.get<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
         const d = store.getDevice(req.params.id);
         if (!d) return reply.code(404).send({ error: 'not found' });
-        return withRuntime(d, manager);
+        return withRuntime(d, manager, store);
     });
 
     const PatchDeviceBody = z.object({
@@ -310,7 +310,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 dcProfile: merged.dcProfile,
             });
         }
-        return withRuntime(merged, manager);
+        return withRuntime(merged, manager, store);
     });
 
     app.delete<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
@@ -418,7 +418,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         // is idempotent — if something raced and the sim is already
         // present, this is a no-op.
         await manager.spawn(restored);
-        return withRuntime(restored, manager);
+        return withRuntime(restored, manager, store);
     });
 
     app.delete<{ Params: { id: string }; Querystring: { confirm?: string } }>(
@@ -443,7 +443,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
 
     const StartSessionBody = z.object({
         connectorId: z.number().int().positive(),
-        idTag: z.string().min(1).default('TEST-TAG-001'),
+        idTag: z.string().min(1).optional(),
     });
 
     app.post<{ Params: { id: string } }>('/api/devices/:id/sessions', async (req, reply) => {
@@ -453,12 +453,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         if (!sim) return reply.code(404).send({ error: 'device not found' });
         if (!sim.snapshot().online) return reply.code(409).send({ error: 'device offline' });
 
+        const idTag = body.data.idTag ?? `TEST-TAG-C${body.data.connectorId}`;
+
         // Persist the session row first so we have an id to thread through.
         const sessionRowId = store.insertSession({
             deviceId: req.params.id,
             connectorId: body.data.connectorId,
             transactionId: 0, // placeholder; updated below would require an updateSession() but we don't expose tx id at row level — keep 0 then patch via SQL if needed
-            idTag: body.data.idTag,
+            idTag,
             status: 'active',
             startedAt: new Date().toISOString(),
             endedAt: null,
@@ -467,7 +469,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             peakPowerKw: 0,
         });
         try {
-            const transactionId = await sim.startSession(body.data.connectorId, body.data.idTag, sessionRowId);
+            const transactionId = await sim.startSession(body.data.connectorId, idTag, sessionRowId);
             // Patch the placeholder transaction_id with the real one from the gateway.
             store.db
                 .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
@@ -613,6 +615,82 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             return reply.code(500).send({ error: (err as Error).message });
         }
     });
+
+    /** Operator-controlled offline mode. Distinct from a network blip:
+     *  this stays offline (auto-reconnect suppressed) until /reconnect
+     *  is called. Used to exercise the offline transaction queue. */
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/disconnect', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        sim.forceOffline();
+        return { ok: true, forcedOffline: true };
+    });
+
+    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reconnect', async (req, reply) => {
+        const sim = manager.get(req.params.id);
+        if (!sim) return reply.code(404).send({ error: 'device not found' });
+        sim.goOnline();
+        return { ok: true, forcedOffline: false };
+    });
+
+    /** Inspect the per-device offline buffer. Returns the rows the CP
+     *  has queued and is waiting to send on the next CSMS reconnect. */
+    app.get<{ Params: { id: string } }>('/api/devices/:id/queue', async (req, reply) => {
+        if (!store.getDevice(req.params.id)) {
+            return reply.code(404).send({ error: 'device not found' });
+        }
+        const rows = store.listPendingMessages(req.params.id);
+        return { deviceId: req.params.id, total: rows.length, rows };
+    });
+
+    /** Discard pending buffer rows for a device. Optional `?action=`
+     *  filter to drop just MeterValues while preserving Start/Stop.
+     *  Requires `?confirm=CLEAR` to guard against accidental loss
+     *  of unsent transaction data. */
+    app.delete<{ Params: { id: string }; Querystring: { confirm?: string; action?: string } }>(
+        '/api/devices/:id/queue',
+        async (req, reply) => {
+            if (!store.getDevice(req.params.id)) {
+                return reply.code(404).send({ error: 'device not found' });
+            }
+            if (req.query.confirm !== 'CLEAR') {
+                return reply.code(400).send({ error: "missing ?confirm=CLEAR" });
+            }
+            const action = req.query.action;
+            // Only allow filtering by the actions we actually queue.
+            if (action && !['MeterValues', 'StartTransaction', 'StopTransaction'].includes(action)) {
+                return reply.code(400).send({ error: 'invalid action filter' });
+            }
+            const removed = store.clearPendingMessages(req.params.id, action);
+            return { ok: true, removed };
+        },
+    );
+
+    /** Download a diagnostics archive that was produced by a prior
+     *  GetDiagnostics CALL. The filename is the value the CP returned
+     *  in the CALLRESULT. Path-traversal attempts are rejected — the
+     *  filename must match the simulator's naming pattern. */
+    app.get<{ Params: { id: string; filename: string } }>(
+        '/api/devices/:id/diagnostics/:filename',
+        async (req, reply) => {
+            const { id, filename } = req.params;
+            if (!/^diagnostics-[A-Za-z0-9_-]+-\d+\.json\.gz$/.test(filename)) {
+                return reply.code(400).send({ error: 'invalid filename' });
+            }
+            const dbDir = pathDirname(resolvePath(process.env.DB_PATH ?? './data/sim.sqlite'));
+            const filePath = resolvePath(dbDir, 'diagnostics', id, filename);
+            const { stat, readFile } = await import('node:fs/promises');
+            try {
+                await stat(filePath);
+            } catch {
+                return reply.code(404).send({ error: 'not found' });
+            }
+            const body = await readFile(filePath);
+            reply.header('content-type', 'application/gzip');
+            reply.header('content-disposition', `attachment; filename="${filename}"`);
+            return reply.send(body);
+        },
+    );
 
     /**
      * List installed SmartCharging profiles for a device. Read-only;
@@ -760,12 +838,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 if (c.status !== 'Unavailable') active_connectors++;
             }
         }
+        const queue = store.countPendingMessagesAll();
         return {
             total,
             online,
             offline: total - online,
             chargingConnectors: charging,
             activeConnectors: active_connectors,
+            pendingMessages: queue.total,
+            devicesWithPending: queue.devices,
         };
     });
 
@@ -811,7 +892,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             };
             send({
                 type: 'hello',
-                devices: store.listDevices().map((d) => withRuntime(d, manager)),
+                devices: store.listDevices().map((d) => withRuntime(d, manager, store)),
             });
 
             // Per-connection coalescing buffers. Flushed on a 100ms
@@ -864,10 +945,15 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             };
 
             const onFrame = (e: unknown) => {
-                const f = e as { deviceId?: string; action?: string };
+                const f = e as { deviceId?: string; action?: string; direction?: string };
                 const payload = { ...(e as object), at: Date.now() };
                 if (f.action && COALESCE_FRAME_ACTIONS.has(f.action) && f.deviceId) {
-                    const key = `${f.deviceId}:${f.action}`;
+                    // Key by direction too — otherwise the CSMS's CALLRESULT
+                    // (direction=in) overwrites the CP's CALL (direction=out)
+                    // within the 100ms flush window, hiding the originating
+                    // send and making it look like the CSMS spontaneously
+                    // sent Heartbeat/MeterValues.
+                    const key = `${f.deviceId}:${f.direction ?? '?'}:${f.action}`;
                     if (coalescedFrames.has(key)) {
                         droppedByDevice.set(f.deviceId, (droppedByDevice.get(f.deviceId) ?? 0) + 1);
                     }
@@ -877,12 +963,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 }
             };
 
+            const onQueueOverflow = (e: unknown) => send({ type: 'queue-overflow', payload: e });
             const onBenchmarkProgress = (e: unknown) => send({ type: 'benchmark', payload: e });
             const onBenchmarkDone = (e: unknown) => send({ type: 'benchmark-done', payload: e });
             manager.on('state', onState);
             manager.on('tick', onTick);
             manager.on('session', onSession);
             manager.on('frame', onFrame);
+            manager.on('queueOverflow', onQueueOverflow);
             benchmarkBus.on('progress', onBenchmarkProgress);
             benchmarkBus.on('done', onBenchmarkDone);
             socket.on('close', () => {
@@ -891,6 +979,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 manager.off('tick', onTick);
                 manager.off('session', onSession);
                 manager.off('frame', onFrame);
+                manager.off('queueOverflow', onQueueOverflow);
                 benchmarkBus.off('progress', onBenchmarkProgress);
                 benchmarkBus.off('done', onBenchmarkDone);
             });
@@ -1060,7 +1149,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     return app;
 }
 
-function withRuntime(d: Device, mgr: DeviceManager) {
+function withRuntime(d: Device, mgr: DeviceManager, store: Store) {
     const sim = mgr.get(d.id);
     const snap = sim?.snapshot();
     // Strip authPassword from the wire response — it's a shared secret.
@@ -1071,6 +1160,7 @@ function withRuntime(d: Device, mgr: DeviceManager) {
         hasAuthPassword: Boolean(authPassword),
         online: snap?.online ?? false,
         connectors: snap?.connectors ?? defaultConnectors(d),
+        pendingQueueDepth: store.countPendingMessages(d.id),
     };
 }
 

@@ -63,12 +63,19 @@ interface LiveState {
         lastWindowDropped: number;
         byDevice: Map<string, { lastSampleAt: number; lastWindow: number; total: number }>;
     };
+    /** Per-device record of offline-queue overflow events. The server
+     *  trims oldest MeterValues when the pending_messages table exceeds
+     *  OFFLINE_QUEUE_MAX; each trim emits a queueOverflow event we
+     *  surface as a badge on the device page. `kept` is the post-trim
+     *  cap (so the UI can show "queue at capacity: X"). */
+    queueOverflow: Map<string, { lastDropped: number; lastAt: number; total: number; kept: number }>;
     setBenchmarkProgress: (p: BenchmarkProgress) => void;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
     applyTick: (t: MeterTick) => void;
     appendFrame: (e: Omit<TraceEntry, 'seq'>) => void;
     recordCoalescedDrop: (sample: { total: number; byDevice: Record<string, number> }) => void;
+    recordQueueOverflow: (sample: { deviceId: string; dropped: number; kept: number }) => void;
     clearTraces: (deviceId: string) => void;
     reset: (deviceId: string) => void;
     /** Drop every map entry whose deviceId isn't in `keep`. Called from
@@ -85,6 +92,7 @@ export const useLiveStore = create<LiveState>((set) => ({
     nextTraceSeq: 0,
     benchmarkProgress: new Map(),
     coalesce: { totalDropped: 0, lastSampleAt: 0, lastWindowDropped: 0, byDevice: new Map() },
+    queueOverflow: new Map(),
 
     setBenchmarkProgress: (p) =>
         set((s) => {
@@ -155,6 +163,19 @@ export const useLiveStore = create<LiveState>((set) => ({
             };
         }),
 
+    recordQueueOverflow: (sample) =>
+        set((s) => {
+            const next = new Map(s.queueOverflow);
+            const prev = next.get(sample.deviceId);
+            next.set(sample.deviceId, {
+                lastDropped: sample.dropped,
+                lastAt: Date.now(),
+                total: (prev?.total ?? 0) + sample.dropped,
+                kept: sample.kept,
+            });
+            return { queueOverflow: next };
+        }),
+
     clearTraces: (deviceId) =>
         set((s) => {
             const next = new Map(s.traces);
@@ -169,17 +190,20 @@ export const useLiveStore = create<LiveState>((set) => ({
             const tk = new Map(s.tick);
             const tr = new Map(s.traces);
             const cb = new Map(s.coalesce.byDevice);
+            const qo = new Map(s.queueOverflow);
             on.delete(deviceId);
             for (const k of [...cs.keys()]) if (k.startsWith(`${deviceId}:`)) cs.delete(k);
             for (const k of [...tk.keys()]) if (k.startsWith(`${deviceId}:`)) tk.delete(k);
             tr.delete(deviceId);
             cb.delete(deviceId);
+            qo.delete(deviceId);
             return {
                 online: on,
                 connectorStatus: cs,
                 tick: tk,
                 traces: tr,
                 coalesce: { ...s.coalesce, byDevice: cb },
+                queueOverflow: qo,
             };
         }),
 
@@ -197,12 +221,14 @@ export const useLiveStore = create<LiveState>((set) => ({
                 (k) => !keep.has(k.split(':')[0] ?? ''),
             );
             const coalesceMissing = [...s.coalesce.byDevice.keys()].filter((id) => !keep.has(id));
+            const qoMissing = [...s.queueOverflow.keys()].filter((id) => !keep.has(id));
             if (
                 onlineMissing.length === 0 &&
                 tracesMissing.length === 0 &&
                 connStatusMissing.length === 0 &&
                 tickMissing.length === 0 &&
-                coalesceMissing.length === 0
+                coalesceMissing.length === 0 &&
+                qoMissing.length === 0
             ) {
                 return {};
             }
@@ -211,17 +237,20 @@ export const useLiveStore = create<LiveState>((set) => ({
             const tk = new Map(s.tick);
             const tr = new Map(s.traces);
             const cb = new Map(s.coalesce.byDevice);
+            const qo = new Map(s.queueOverflow);
             for (const id of onlineMissing) on.delete(id);
             for (const id of tracesMissing) tr.delete(id);
             for (const k of connStatusMissing) cs.delete(k);
             for (const k of tickMissing) tk.delete(k);
             for (const id of coalesceMissing) cb.delete(id);
+            for (const id of qoMissing) qo.delete(id);
             return {
                 online: on,
                 connectorStatus: cs,
                 tick: tk,
                 traces: tr,
                 coalesce: { ...s.coalesce, byDevice: cb },
+                queueOverflow: qo,
             };
         }),
 }));

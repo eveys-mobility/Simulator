@@ -20,8 +20,12 @@ const TLS_INSECURE = process.env.TLS_INSECURE === '1' || process.env.TLS_INSECUR
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const store = new Store(DB_PATH);
-const aborted = store.abortOrphanedSessions();
-if (aborted) console.log(`[server] aborted ${aborted} orphaned active session(s) from prior run`);
+// Real-device active sessions survive a server restart now — the
+// Simulator constructor reads them back and resumes the tick. Only
+// bench_*-device sessions still get aborted, since the bench devices
+// themselves are deleted on each boot.
+const aborted = store.abortOrphanedBenchmarkSessions();
+if (aborted) console.log(`[server] aborted ${aborted} orphaned bench session(s) from prior run`);
 
 // Mark any benchmark_runs row left at status='running' as failed —
 // the engine isn't around to advance it. Delete every leftover

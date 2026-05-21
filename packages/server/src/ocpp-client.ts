@@ -32,13 +32,12 @@ interface PendingCall {
 }
 
 const CALL_TIMEOUT_MS = 30_000;
-/** OCPP allows any positive integer, but a CSMS that returns 0 or 1
- *  would have us hammering Heartbeats forever. Real deployments are
- *  60–900 seconds; clamp inside that window so a misconfigured CSMS
- *  can't push us out of safe territory. */
-const HEARTBEAT_MIN_SEC = 30;
+/** OCPP allows any positive integer. Floor at 1s so local-testing
+ *  values aren't silently bumped up; cap at 24h so a misconfigured
+ *  CSMS sending 0 or absurd values can't disable heartbeats entirely. */
+const HEARTBEAT_MIN_SEC = 1;
 const HEARTBEAT_MAX_SEC = 86_400; // 24h — anything beyond is effectively never
-const HEARTBEAT_DEFAULT_SEC = 300;
+const HEARTBEAT_DEFAULT_SEC = 60;
 
 function clampHeartbeat(raw: number, label: string): number {
     if (!Number.isFinite(raw) || raw <= 0) return HEARTBEAT_DEFAULT_SEC;
@@ -84,9 +83,10 @@ export class OcppClient extends EventEmitter {
     private reconnect: NodeJS.Timeout | null = null;
     private bootRetry: NodeJS.Timeout | null = null;
     private bootDeferred = false;
-    private heartbeatIntervalSec = 300;
+    private heartbeatIntervalSec = HEARTBEAT_DEFAULT_SEC;
     private reconnectAttempt = 0;
     private stopped = false;
+    private forcedOffline = false;
     private incomingHandler: IncomingCallHandler | null = null;
 
     constructor(
@@ -112,6 +112,30 @@ export class OcppClient extends EventEmitter {
         }
     }
 
+    /** Force the device offline and keep it that way until goOnline().
+     *  Used to exercise the offline queue: the CP keeps charging locally,
+     *  StopTransaction / MeterValues are buffered to SQLite, and the
+     *  drain fires when the operator flips it back online. Unlike
+     *  disconnect(), this suppresses the automatic reconnect. */
+    forceOffline(): void {
+        this.forcedOffline = true;
+        if (this.reconnect) {
+            clearTimeout(this.reconnect);
+            this.reconnect = null;
+        }
+        if (this.ws) this.ws.close();
+    }
+
+    goOnline(): void {
+        if (!this.forcedOffline) return;
+        this.forcedOffline = false;
+        if (!this.connected && !this.reconnect) void this.openSocket();
+    }
+
+    isForcedOffline(): boolean {
+        return this.forcedOffline;
+    }
+
     /** Update the heartbeat cadence. Used when the CSMS issues a
      *  ChangeConfiguration for HeartbeatInterval. Idempotent — restarts
      *  the interval timer at the new cadence. Values are clamped to a
@@ -119,10 +143,11 @@ export class OcppClient extends EventEmitter {
     setHeartbeatIntervalSec(seconds: number): void {
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         this.heartbeatIntervalSec = clampHeartbeat(seconds, this.device.id);
-        if (this.heartbeat) {
-            clearInterval(this.heartbeat);
-            this.startHeartbeat();
-        }
+        // startHeartbeat clears the prior interval before arming the new
+        // one, so we don't have to do it here. Only re-arm if we're
+        // actually online and past Boot — otherwise let the on-open /
+        // boot-retry path arm at the right moment.
+        if (this.connected && !this.bootDeferred) this.startHeartbeat();
     }
 
     isOnline(): boolean {
@@ -184,7 +209,7 @@ export class OcppClient extends EventEmitter {
     }
 
     private async openSocket(): Promise<void> {
-        if (this.stopped) return;
+        if (this.stopped || this.forcedOffline) return;
         const url = `${this.device.ocppUrl}/${this.device.id}`;
         const headers: Record<string, string> = {};
         if (this.device.authPassword) {
@@ -235,7 +260,7 @@ export class OcppClient extends EventEmitter {
     }
 
     private scheduleReconnect(): void {
-        if (this.stopped || this.reconnect) return;
+        if (this.stopped || this.reconnect || this.forcedOffline) return;
         this.reconnectAttempt++;
         ocppWsReconnectsTotal.inc();
         // Exponential backoff with full jitter (AWS architecture blog
@@ -373,6 +398,13 @@ export class OcppClient extends EventEmitter {
     }
 
     private startHeartbeat(): void {
+        // Always clear the previous timer before arming. Node's setInterval
+        // returns a fresh handle; without clearInterval the old one keeps
+        // firing forever — so every reconnect / boot-retry / config change
+        // that lands here would add another parallel Heartbeat loop, and
+        // the rate would compound. Single-fix for "lots of heartbeats at
+        // the same time" reports.
+        if (this.heartbeat) clearInterval(this.heartbeat);
         this.heartbeat = setInterval(() => {
             this.call('Heartbeat', {}).catch((err) => this.emit('error', err));
         }, this.heartbeatIntervalSec * 1000);
@@ -406,12 +438,20 @@ export class OcppClient extends EventEmitter {
         );
     }
 
-    stopTransaction(args: { transactionId: number; meterStop: number; reason: string; idTag?: string }): Promise<unknown> {
+    stopTransaction(args: {
+        // Spec: integer. Toger / OCPI bridge: UUID string — accepted
+        // here for symmetry with StartTransactionResSchema's union.
+        transactionId: number | string;
+        meterStop: number;
+        reason: string;
+        idTag?: string;
+        timestamp?: string;
+    }): Promise<unknown> {
         return this.call('StopTransaction', {
             transactionId: args.transactionId,
             idTag: args.idTag,
             meterStop: args.meterStop,
-            timestamp: new Date().toISOString(),
+            timestamp: args.timestamp ?? new Date().toISOString(),
             reason: args.reason,
         });
     }
@@ -420,14 +460,33 @@ export class OcppClient extends EventEmitter {
      * Send a MeterValues frame whose `sampledValue[]` is computed by
      * the caller. The Simulator builds the array from the AC/DC
      * measurand emitters in @ocpp-sim/core/sim, filtered against the
-     * device's `MeterValuesSampledData` config key.
+     * device's `MeterValuesSampledData` config key. `timestamp` should
+     * be the *sample* time — for offline-queued replays this preserves
+     * when the energy was actually measured, not when it was delivered.
      */
-    sendMeterValueRich(connectorId: number, transactionId: number, sampledValue: unknown[]): Promise<unknown> {
+    sendMeterValueRich(
+        connectorId: number,
+        // Spec: integer. Toger / OCPI bridge: string.
+        transactionId: number | string,
+        sampledValue: unknown[],
+        timestamp?: string,
+    ): Promise<unknown> {
         return this.call('MeterValues', {
             connectorId,
             transactionId,
-            meterValue: [{ timestamp: new Date().toISOString(), sampledValue }],
+            meterValue: [{ timestamp: timestamp ?? new Date().toISOString(), sampledValue }],
         });
+    }
+
+    /**
+     * Replay-path send. The offline queue stores a fully-formed OCPP
+     * payload and replays it verbatim on reconnect; the action string
+     * decides only the routing on the CSMS side. Bypasses the helper
+     * methods so the *original* timestamp inside the payload is
+     * preserved untouched.
+     */
+    callRaw(action: string, payload: unknown): Promise<unknown> {
+        return this.call(action, payload);
     }
 
     /**
