@@ -1208,6 +1208,11 @@ export class Simulator extends EventEmitter {
             const c = this.connectors.get(id);
             if (!c || !c.operative || c.transactionId !== null) return false;
             if (c.status === 'Available') return true;
+            // Preparing = plug already in, waiting for the start signal.
+            // This is the normal real-world flow: driver plugs in, then
+            // the CSMS sends RemoteStart. Refusing it here is the bug
+            // that makes the simulator look silent on the wire.
+            if (c.status === 'Preparing') return true;
             if (c.status === 'Reserved' && c.reservation?.idTag === idTag) return true;
             return false;
         });
