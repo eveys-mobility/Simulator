@@ -1,91 +1,112 @@
 # Running the simulator
 
-Two ways to run: **local dev** (hot-reload, split server + Vite) and **production** (single container, one port, persisted SQLite).
+Two scenarios are covered:
+
+- **On your laptop** for development and exploration — fast feedback, hot reload, no Docker required.
+- **On a server** for everyone on your team to share — one container, runs forever, behind a public hostname with HTTPS.
+
+A quick word on terminology: throughout this guide, **back-office** means the OCPP server that real charging stations would talk to. You may also see it called the *CSMS* (Charging Station Management System) — same thing. The simulator's job is to pretend to be charging stations and talk to that back-office on their behalf.
 
 ---
 
-## Local development
+## On your laptop
 
-Two processes: a Fastify+ws server on `:3001` and a Vite SPA on `:5173`. Vite proxies API + WebSocket calls to the server, so the SPA hits a single origin from the browser's perspective.
+The simulator has two parts that run side by side:
 
-### Prerequisites
+- A **back-end** that holds your simulated devices, talks OCPP to your back-office, and exposes a small API.
+- A **web UI** where you create devices, start sessions, watch messages flow, and run benchmarks.
 
-- Node.js ≥ 20 (`node -v`)
-- Toolchain for `better-sqlite3` native build (macOS: Xcode CLT; Linux: `python3 make g++`)
+In development you run them as two processes so the UI hot-reloads on every change. In production they're bundled together — one container, one port — and you don't think about them separately.
 
-### Install + run
+### What you need
+
+- Node.js 20 or newer (`node -v` to check).
+- A C++ toolchain for the database driver:
+    - **macOS**: Xcode Command Line Tools (`xcode-select --install`).
+    - **Linux**: `python3`, `make`, `g++`.
+
+### Install and run
 
 ```sh
 npm install
 
-# terminal 1 — Fastify server (REST + WS + OCPP client)
+# In one terminal — the back-end
 OCPP_URL=ws://localhost:19000 npm run dev:server
 
-# terminal 2 — Vite SPA (hot reload)
+# In another terminal — the web UI
 npm run dev:web
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173> in your browser. That's the simulator UI.
 
-- Server API: <http://localhost:3001/api/*>
-- Server WS pub/sub: `ws://localhost:3001/api/ws`
-- SPA dev server: <http://localhost:5173>
-- Default OCPP gateway target: `ws://localhost:19000` (override via `OCPP_URL` or per-device in the Settings page)
+A few things to know:
 
-The server defaults to `HOST=127.0.0.1` in dev so a fresh checkout doesn't expose itself on the LAN. Set `HOST=0.0.0.0` if you need another device on your network to hit it.
+- `OCPP_URL` is the address of your back-office. The example points at `localhost:19000` because that's a common default for local back-office setups; change it to wherever yours runs. The address you set here is just the **default** for newly created devices — once a device exists, you can edit its address from the UI.
+- The back-end serves the API at `http://localhost:3001` and a real-time updates channel at `ws://localhost:3001/api/ws`. The UI talks to both for you.
+- By default the back-end only listens on `127.0.0.1` so a fresh checkout doesn't expose itself to your office Wi-Fi. If a teammate on your network needs to hit it, set `HOST=0.0.0.0`.
 
-### SQLite location
+### Where data lives
 
-Dev writes to `./data/sim.sqlite` (created on first run). Delete the file to reset all devices, sessions, and benchmark runs.
+Your devices, sessions, and benchmark results are saved to `./data/sim.sqlite` in the project folder. Delete that file to wipe everything and start fresh.
 
-### Observability (optional)
+### Pointing at a real back-office
 
-Prometheus + Grafana run in Compose; the simulator stays on the host:
+Just change `OCPP_URL`:
+
+```sh
+OCPP_URL=wss://your-csms.example.com/ocpp/STATION_01 npm run dev:server
+```
+
+If your back-office uses HTTPS (`wss://`) with a certificate signed by a real authority, that's all — it just works. If it uses a self-signed certificate (common in test environments), add `TLS_INSECURE=1` to skip certificate verification. Never do that in production.
+
+If your back-office requires a password (it'll ask for one over HTTP basic auth on the WebSocket handshake), set the password on each device from the **Edit device** dialog. Leave it blank for back-offices that accept any connection.
+
+### Tests and the built-in conformance suite
+
+```sh
+npm test            # run all tests
+npm run conformance # run the OCPP 1.6 conformance suite
+npm run lint        # lint the code
+```
+
+The conformance suite is also exposed in the UI at `/conformance` with a *Run* button.
+
+### Optional: charts and metrics
+
+The simulator publishes operational metrics that Prometheus can read. To bring up Prometheus and Grafana with a ready-made dashboard:
 
 ```sh
 docker compose up -d
-# Prometheus → http://localhost:9090
-# Grafana    → http://localhost:3000  (admin / admin)
 ```
 
-Grafana scrapes `host.docker.internal:3001/metrics`. The pre-provisioned *OCPP Simulator — Overview* dashboard covers CALL rate, p99 latency, errors, frame throughput, and active devices/sessions.
+- Prometheus → <http://localhost:9090>
+- Grafana → <http://localhost:3000> (login: `admin` / `admin`)
 
-### Running against a real CSMS
-
-Point `OCPP_URL` at the CSMS:
-
-```sh
-OCPP_URL=wss://csms.example.com/ocpp/CP_001 npm run dev:server
-```
-
-For self-signed dev CSMSes, add `TLS_INSECURE=1` (never in production). For OCPP 1.6 §17.4 basic auth, set the device's `authPassword` in the **Edit device** dialog — the simulator presents `Authorization: Basic base64(deviceId:password)` on the upgrade.
-
-### Tests + conformance
-
-```sh
-npm test                  # all workspace tests
-npm run conformance       # OCPP 1.6 conformance suite (Core/SmartCharging/etc.)
-npm run lint              # biome
-```
+The simulator itself stays on your laptop (not in Docker) — only Prometheus and Grafana run in containers, and they reach the simulator across the host network. The dashboard is called *OCPP Simulator — Overview* and shows call rate, latency, errors, throughput, and active devices and sessions.
 
 ---
 
-## Production
+## On a server
 
-One Docker image runs the server **and** serves the built SPA on a single port. No separate Vite process; no reverse proxy needed for splitting front + back.
+Production mode is a single Docker container that serves the API and the web UI together on one port. Your data lives on a Docker volume so it survives restarts and upgrades.
 
-### Fresh Ubuntu server — start to finish
+You'll almost certainly want to put it behind a reverse proxy that handles HTTPS — the simulator itself only speaks plain HTTP. The walkthrough below sets up everything from scratch on a fresh Ubuntu box.
 
-Tested on Ubuntu 22.04 / 24.04 LTS. Assumes a non-root user with sudo and an A record pointing at the box (e.g. `sim.example.com`). Run every step over SSH.
+### Fresh Ubuntu walkthrough
 
-#### 1. Update + base utilities
+Tested on Ubuntu 22.04 and 24.04 LTS. You'll need:
+
+- A server you can SSH into as a regular user with `sudo`.
+- A domain name pointing at the server (for example, `sim.example.com`).
+
+#### Step 1 — Update the system and install basics
 
 ```sh
 sudo apt update && sudo apt -y upgrade
 sudo apt -y install ca-certificates curl gnupg ufw git
 ```
 
-#### 2. Install Docker Engine (official repo)
+#### Step 2 — Install Docker
 
 ```sh
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -101,13 +122,15 @@ sudo apt update
 sudo apt -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 sudo usermod -aG docker $USER
-newgrp docker     # or log out + back in
+newgrp docker     # or log out and log back in
 docker run --rm hello-world
 ```
 
-#### 3. Firewall
+If `hello-world` prints a welcome message, Docker is working.
 
-Open SSH + the reverse proxy ports only. The simulator stays bound to the Docker bridge / localhost; never expose `:3001` directly.
+#### Step 3 — Open the firewall for the web only
+
+You want the world to reach your reverse proxy (ports 80 and 443) and you to reach SSH. The simulator's own port stays internal.
 
 ```sh
 sudo ufw allow OpenSSH
@@ -117,7 +140,7 @@ sudo ufw --force enable
 sudo ufw status
 ```
 
-#### 4. Clone + build the image
+#### Step 4 — Get the code and build the image
 
 ```sh
 sudo mkdir -p /opt/ocpp-sim && sudo chown $USER:$USER /opt/ocpp-sim
@@ -126,18 +149,24 @@ git clone https://github.com/eveys-mobility/Simulator.git .
 docker build -t ocpp-sim .
 ```
 
-#### 5. Generate the auth token + persist it
+The build takes a few minutes the first time.
+
+#### Step 5 — Create an access token
+
+The simulator is protected by a single shared password (called the auth token). Generate one and save it to a file so you can reuse it across restarts:
 
 ```sh
 sudo mkdir -p /etc/ocpp-sim
 openssl rand -hex 32 | sudo tee /etc/ocpp-sim/auth-token >/dev/null
 sudo chmod 600 /etc/ocpp-sim/auth-token
-cat /etc/ocpp-sim/auth-token   # save this — the SPA will ask for it on first load
+cat /etc/ocpp-sim/auth-token   # save this — the UI will ask for it
 ```
 
-#### 6. Run the container as a systemd unit
+Save the token somewhere safe — your password manager is a good spot. The web UI will ask for it the first time you visit.
 
-A systemd unit (instead of `docker run --restart`) gives you predictable logs via `journalctl` and `systemctl status` for ops.
+#### Step 6 — Start the container under systemd
+
+Putting the container under systemd means Ubuntu starts it on boot, restarts it if it crashes, and gives you proper logs via `journalctl`.
 
 ```sh
 sudo tee /etc/systemd/system/ocpp-sim.service >/dev/null <<'EOF'
@@ -153,7 +182,7 @@ ExecStartPre=-/usr/bin/docker rm -f ocpp-sim
 ExecStart=/bin/sh -c '/usr/bin/docker run --rm --name ocpp-sim \
     -p 127.0.0.1:3001:3001 \
     -v ocpp-sim-data:/data \
-    -e OCPP_URL=wss://csms.example.com/ocpp/CP_001 \
+    -e OCPP_URL=wss://your-csms.example.com/ocpp/STATION_01 \
     -e AUTH_TOKEN=$(cat /etc/ocpp-sim/auth-token) \
     ocpp-sim'
 ExecStop=/usr/bin/docker stop ocpp-sim
@@ -165,14 +194,14 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now ocpp-sim
 sudo systemctl status ocpp-sim
-journalctl -u ocpp-sim -f         # tail logs
+journalctl -u ocpp-sim -f         # press Ctrl+C to stop following logs
 ```
 
-Edit `OCPP_URL` in the unit file to your real CSMS before enabling. The port is published to `127.0.0.1` only — the reverse proxy below exposes it publicly with TLS.
+Before running the commands above, change `OCPP_URL` to your real back-office address. Notice the port mapping: `127.0.0.1:3001:3001` keeps the simulator reachable only from the server itself. The reverse proxy you set up next is what exposes it to the outside world, over HTTPS.
 
-#### 7. TLS + public hostname via Caddy
+#### Step 7 — HTTPS and a public address
 
-Caddy is the shortest path on Ubuntu: one binary, one config line per host, auto-renewing Let's Encrypt certs.
+Caddy is the simplest option: one config line per site, certificates from Let's Encrypt managed automatically.
 
 ```sh
 sudo apt -y install debian-keyring debian-archive-keyring apt-transport-https
@@ -191,23 +220,25 @@ EOF
 sudo systemctl reload caddy
 ```
 
-Caddy obtains the cert on first request and proxies both HTTP and the `/api/ws` upgrade automatically. Hit `https://sim.example.com`, paste the token, you're in.
+Replace `sim.example.com` with your domain. Caddy will fetch a real HTTPS certificate the first time someone visits your URL. Open `https://sim.example.com`, paste your token, and you're in.
 
-If you prefer nginx, the equivalent config is in the [Reverse proxy](#tls--public-hostname) section below — install with `sudo apt -y install nginx`, drop the config in `/etc/nginx/sites-available/ocpp-sim`, then `sudo certbot --nginx -d sim.example.com` to provision the cert.
+Prefer nginx instead? Install it (`sudo apt -y install nginx`), use the nginx config in the [reverse proxy reference](#reverse-proxy-reference) further down, and get a certificate with `sudo certbot --nginx -d sim.example.com`.
 
-#### 8. Verify
+#### Step 8 — Make sure it works
 
 ```sh
-# from the server
+# On the server itself
 curl -s http://127.0.0.1:3001/api/health
 curl -s -H "Authorization: Bearer $(sudo cat /etc/ocpp-sim/auth-token)" \
   http://127.0.0.1:3001/metrics | head
 
-# from your laptop
+# From your laptop
 curl -s https://sim.example.com/api/health
 ```
 
-#### 9. Upgrades
+The health endpoint should return a small JSON blob with `"ok": true`.
+
+#### Step 9 — Updating to a new version later
 
 ```sh
 cd /opt/ocpp-sim
@@ -216,80 +247,89 @@ docker build -t ocpp-sim .
 sudo systemctl restart ocpp-sim
 ```
 
-The named `ocpp-sim-data` volume keeps the SQLite database across rebuilds.
+Your devices, sessions, and benchmark results stay where they are — the data volume is separate from the image.
 
-#### 10. Observability (optional)
+#### Step 10 — Charts on the same server (optional)
 
-If you want Prometheus + Grafana on the same box, `cd /opt/ocpp-sim && docker compose up -d`. Before that, edit `observability/prometheus.yml` to scrape `host.docker.internal:3001` with a `bearer_token` line carrying your `AUTH_TOKEN`, and add `extra_hosts: ['host.docker.internal:host-gateway']` to the simulator's scrape target if Prometheus runs in a separate Compose project. Keep Grafana behind the same Caddy / firewall — don't expose `:3000` publicly.
+If you want Prometheus and Grafana on the same box:
+
+```sh
+cd /opt/ocpp-sim
+docker compose up -d
+```
+
+A couple of caveats:
+
+- Edit `observability/prometheus.yml` and add your auth token as a bearer credential so Prometheus can read the metrics endpoint.
+- Don't expose Grafana's port to the world. Either keep it behind the firewall and SSH-tunnel to it, or add another Caddy block protecting it.
 
 ---
 
-### Build the image
+## Reference
+
+This part is for when you already know what you're doing and just need a value or a config snippet.
+
+### Quick deploy (without the Ubuntu walkthrough)
+
+If you already have Docker, you can skip most of the steps above:
 
 ```sh
 docker build -t ocpp-sim .
-```
-
-The multi-stage `Dockerfile` builds the web bundle, rebuilds the `better-sqlite3` native binding, and ships a slim runtime stage that runs `npm --workspace @ocpp-sim/server run start` under `tini`.
-
-### Run
-
-```sh
 docker run --rm -d \
     -p 3001:3001 \
     -v ocpp-sim-data:/data \
-    -e OCPP_URL=wss://csms.example.com/ocpp/CP_001 \
+    -e OCPP_URL=wss://your-csms.example.com/ocpp/STATION_01 \
     -e AUTH_TOKEN=$(openssl rand -hex 32) \
     --name ocpp-sim \
     ocpp-sim
 ```
 
-UI + API at <http://localhost:3001>. SQLite persists to the named volume `ocpp-sim-data` (mounted at `/data` inside the container) so devices, sessions, and benchmark runs survive restarts.
+The UI is at <http://localhost:3001>. The data volume is named `ocpp-sim-data` and lives at `/data` inside the container.
 
-Print the auth token you generated; the SPA will prompt for it on first load.
+Print the auth token you generated above (it's in the `docker inspect` output) — the UI asks for it on first load.
 
-### Required production settings
+### What you must set for production
 
-| Setting | Why |
+| Setting | Why it matters |
 |---|---|
-| `AUTH_TOKEN` | Without it, the API + WS + `/metrics` are unauthenticated. `/api/health` and `/api/auth/ping` stay open for probes / SPA bootstrap. |
-| Persistent volume on `/data` | SQLite holds devices, sessions, benchmark runs. Loss = full reset. |
-| `OCPP_URL` pointing at your CSMS | Otherwise new devices default to `ws://localhost:19000`, which won't resolve from inside the container. |
+| `AUTH_TOKEN` | Without it, anyone who can reach the server can use the simulator and read its metrics. |
+| A persistent volume on `/data` | Without it, your devices and history vanish whenever the container restarts. |
+| `OCPP_URL` set to your real back-office | Otherwise new devices try to dial the example address and never connect. |
 
-### All environment variables
+### All settings
 
-| Var | Default (image) | Default (dev) | Notes |
+| Variable | Default in the image | Default in dev | What it does |
 |---|---|---|---|
-| `PORT` | `3001` | `3001` | HTTP/WS listen port. |
-| `HOST` | `0.0.0.0` | `127.0.0.1` | Bind address. Dev = loopback, image = all interfaces. |
-| `OCPP_URL` | `ws://localhost:19000` | same | Default gateway for new devices. The Settings page persists overrides. |
-| `DB_PATH` | `/data/sim.sqlite` | `./data/sim.sqlite` | SQLite file. Mount a volume in production. |
-| `AUTH_TOKEN` | unset | unset | Bearer token gating `/api/*` and `/metrics`. Required in production. |
-| `WEB_DIST_DIR` | `/app/packages/web/dist` | unset | Set automatically inside the image. Leave unset in dev — Vite serves on `:5173`. |
-| `TLS_INSECURE` | unset | unset | `1` to skip `wss://` certificate verification. Dev-only. |
-| `OFFLINE_QUEUE_MAX` | `10000` | `10000` | Per-device offline OCPP queue cap. Messages beyond this are dropped oldest-first. |
+| `PORT` | `3001` | `3001` | The port the simulator listens on. |
+| `HOST` | `0.0.0.0` | `127.0.0.1` | Which network address to bind to. The image binds everywhere; dev binds to localhost only so a fresh checkout isn't exposed to the network. |
+| `OCPP_URL` | `ws://localhost:19000` | same | The back-office address that newly created devices use by default. |
+| `DB_PATH` | `/data/sim.sqlite` | `./data/sim.sqlite` | Where the database file lives. Always put it on a mounted volume in production. |
+| `AUTH_TOKEN` | unset | unset | The shared access password. **Required in production.** |
+| `WEB_DIST_DIR` | `/app/packages/web/dist` | unset | Where the bundled UI lives. The image sets this for you. Leave it unset in dev. |
+| `TLS_INSECURE` | unset | unset | Set to `1` to skip HTTPS certificate verification when connecting to back-offices with self-signed certificates. **Never use in production.** |
+| `OFFLINE_QUEUE_MAX` | `10000` | `10000` | How many messages each device may queue when its back-office is unreachable. When the queue is full, the oldest message is dropped. |
 
-### Health + metrics
+### Health and metrics endpoints
 
-- `GET /api/health` — open, no auth. Use as Docker `HEALTHCHECK` or k8s liveness/readiness.
-- `GET /metrics` — Prometheus text format. Requires `Authorization: Bearer $AUTH_TOKEN` when `AUTH_TOKEN` is set.
+- **`GET /api/health`** — no authentication required. Returns a small JSON object so health checkers can verify the service is up.
+- **`GET /metrics`** — Prometheus-format metrics. When `AUTH_TOKEN` is set, you must send it as `Authorization: Bearer <token>`.
 
-Example healthcheck in `docker run`:
+Example using Docker's built-in health check:
 
 ```sh
 docker run --rm -d \
     -p 3001:3001 \
     -v ocpp-sim-data:/data \
     -e AUTH_TOKEN=… \
-    -e OCPP_URL=wss://csms.example.com/ocpp/CP_001 \
+    -e OCPP_URL=wss://your-csms.example.com/ocpp/STATION_01 \
     --health-cmd='wget -qO- http://127.0.0.1:3001/api/health || exit 1' \
     --health-interval=15s --health-timeout=3s --health-retries=3 \
     --name ocpp-sim ocpp-sim
 ```
 
-### docker-compose
+### Docker Compose
 
-The bundled `docker-compose.yml` only carries the observability stack (Prometheus + Grafana scraping the host). To run the simulator under Compose too, add a service alongside them:
+The repo ships a `docker-compose.yml` that brings up Prometheus and Grafana — but not the simulator itself, because in development the simulator runs from `npm run dev:server` on your laptop. To run everything together under Compose, add a service for the simulator alongside the existing ones:
 
 ```yaml
 services:
@@ -299,7 +339,7 @@ services:
         ports:
             - '3001:3001'
         environment:
-            OCPP_URL: wss://csms.example.com/ocpp/CP_001
+            OCPP_URL: wss://your-csms.example.com/ocpp/STATION_01
             AUTH_TOKEN: ${OCPP_SIM_AUTH_TOKEN}
         volumes:
             - ocpp-sim-data:/data
@@ -309,15 +349,27 @@ volumes:
     ocpp-sim-data:
 ```
 
-Then `OCPP_SIM_AUTH_TOKEN=$(openssl rand -hex 32) docker compose up -d`.
+Then:
 
-If Prometheus also runs in Compose, change its scrape target from `host.docker.internal:3001` to `simulator:3001` and forward `AUTH_TOKEN` as a `bearer_token` in `observability/prometheus.yml`.
+```sh
+OCPP_SIM_AUTH_TOKEN=$(openssl rand -hex 32) docker compose up -d
+```
 
-### TLS + public hostname
+If Prometheus is also in this Compose project, change its scrape target from `host.docker.internal:3001` to `simulator:3001` and pass the auth token in `observability/prometheus.yml`.
 
-The server speaks plain HTTP + WS. Terminate TLS at a reverse proxy and forward both `/` (HTTP) and `/api/ws` (WebSocket upgrade) to the container.
+### Reverse proxy reference
 
-#### nginx
+The simulator speaks plain HTTP. Any modern reverse proxy can sit in front of it and add HTTPS, a public hostname, and (optionally) rate limiting or extra access control.
+
+**Caddy** (recommended for simplicity):
+
+```caddyfile
+sim.example.com {
+    reverse_proxy 127.0.0.1:3001
+}
+```
+
+**nginx**:
 
 ```nginx
 server {
@@ -346,34 +398,27 @@ server {
 }
 ```
 
-#### Caddy
+The nginx `/api/ws` block is important: real-time updates to the UI flow over a WebSocket, which needs the `Upgrade` header. Caddy handles this automatically.
 
-```caddyfile
-sim.example.com {
-    reverse_proxy 127.0.0.1:3001
-}
-```
+### How access control works
 
-Caddy handles the WebSocket upgrade for `/api/ws` automatically.
+There is one shared password, called the auth token (`AUTH_TOKEN`). It protects everything: the API, the real-time updates channel, and the metrics endpoint. The only exceptions are the health endpoint (so monitoring tools can check the service is up) and the small endpoint the UI uses to ask "do I need to log in?".
 
-### Auth at a glance
+When you open the UI, it asks for the token and remembers it in your browser. The token then rides along with every request the UI makes.
 
-- `AUTH_TOKEN` is one shared secret. It gates REST, WS, and `/metrics`.
-- The SPA prompts for the token when the backend reports `authRequired`, stores it in `localStorage`, and attaches it to REST + WS requests.
-- Browser WebSocket can't set headers, so the client passes the token via `?token=…` or a `bearer.<token>` subprotocol. The reverse-proxy config above forwards both.
+If you're writing your own tooling: pass `Authorization: Bearer <token>` on every HTTP request. For WebSocket connections from browser code (which can't set headers), pass `?token=<token>` in the URL or use a `bearer.<token>` subprotocol — both are accepted.
 
-### Logs + graceful shutdown
+### Shutdown and logs
 
-`tini` is PID 1 inside the image so `docker stop` (SIGTERM) reaches the Node process, which closes OCPP sockets cleanly and flushes SQLite. Default log destination is stdout/stderr — collect via your container runtime's standard log driver.
+The container handles `docker stop` gracefully: it closes connections to your back-office cleanly and writes any pending data to disk before exiting. Logs go to standard output and standard error — whatever you use to collect Docker logs will pick them up.
 
-### Upgrading
-
-The SQLite schema is created/migrated on boot. To upgrade:
+### Upgrading later
 
 ```sh
-docker pull ocpp-sim:<new-tag>   # or rebuild locally
-docker stop ocpp-sim && docker rm ocpp-sim
-docker run … ocpp-sim:<new-tag>  # same volume, same env
+docker pull ocpp-sim:<new-tag>     # or rebuild locally
+docker stop ocpp-sim
+docker rm ocpp-sim
+docker run … ocpp-sim:<new-tag>    # same volume, same environment
 ```
 
-The named volume keeps the database; the new image picks up where the old one left off.
+The database schema updates itself on first boot of the new version. Your data carries over.
