@@ -20,6 +20,8 @@ npm run dev:web
 
 Server: <http://localhost:3001> · Web: <http://localhost:5173>
 
+Full local-dev + production guide: [`docs/RUNNING.md`](docs/RUNNING.md).
+
 ## Tests
 
 ```sh
