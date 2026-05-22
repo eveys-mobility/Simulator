@@ -122,7 +122,7 @@ sudo ufw status
 ```sh
 sudo mkdir -p /opt/ocpp-sim && sudo chown $USER:$USER /opt/ocpp-sim
 cd /opt/ocpp-sim
-git clone https://github.com/<your-org>/ocpp-chargepoint-simulator.git .
+git clone https://github.com/eveys-mobility/Simulator.git .
 docker build -t ocpp-sim .
 ```
 

@@ -1,5 +1,7 @@
 # OCPP Charge-Point Simulator
 
+Repo: <https://github.com/eveys-mobility/Simulator> · `git clone git@github.com:eveys-mobility/Simulator.git`
+
 A device-first OCPP 1.6J charge-point simulator. Multi-device, lightweight, type-safe end-to-end.
 
 A five-package npm workspace:
