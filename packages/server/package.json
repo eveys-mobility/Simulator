@@ -20,7 +20,7 @@
         "@fastify/websocket": "^11.0.1",
         "@ocpp-sim/conformance": "*",
         "@ocpp-sim/core": "*",
-        "better-sqlite3": "^11.5.0",
+        "better-sqlite3": "^12.11.1",
         "fastify": "^5.1.0",
         "prom-client": "^15.1.3",
         "uuid": "^11.0.3",
