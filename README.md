@@ -29,14 +29,14 @@ npm run dev:web
 The repo ships a `Makefile` that wraps the common npm scripts. Run `make help` to see every target:
 
 ```sh
-make help            # list all targets
-make install         # install dependencies
-make ocpp            # run the back-end (dev:server) — honors OCPP_URL
-make eveys-console   # run the web console (dev:web on :5173)
-make dev             # run both together (Ctrl-C stops both)
-make qa              # lint + typecheck + test
-make build           # build every workspace
-make update          # refresh dependencies and the lockfile
+make help        # list all targets
+make install     # install dependencies
+make ocpp        # run the back-end (dev:server) — honors OCPP_URL
+make web         # run the web UI (dev:web on :5173)
+make dev         # run both together (Ctrl-C stops both)
+make qa          # lint + typecheck + test
+make build       # build every workspace
+make update      # refresh dependencies and the lockfile
 ```
 
 Override defaults inline, e.g. `make ocpp OCPP_URL=wss://csms.example.com/ocpp/STATION_01`.

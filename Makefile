@@ -13,20 +13,19 @@ AUTH_TOKEN     ?=
 .DEFAULT_GOAL := help
 
 .PHONY: help install update build clean \
-        ocpp eveys-console dev start \
+        ocpp web dev \
         test conformance lint format typecheck qa \
-        docker-build docker-run docker-stop docker-logs \
-        monitoring-up monitoring-down
+        docker-build docker-run docker-stop
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Install / update --------------------------------------------------------
 
 install: ## Install all workspace dependencies
 	npm install
 
-update: ## Update dependencies to their latest allowed versions and refresh the lockfile
+update: ## Update dependencies and refresh the lockfile
 	npm update
 	npm install
 
@@ -35,17 +34,14 @@ update: ## Update dependencies to their latest allowed versions and refresh the 
 ocpp: ## Run the OCPP back-end (dev:server) against $$OCPP_URL
 	OCPP_URL=$(OCPP_URL) HOST=$(HOST) PORT=$(PORT) npm run dev:server
 
-eveys-console: ## Run the simulator web console (dev:web, Vite on :5173)
+web: ## Run the simulator web UI (Vite on :5173)
 	npm run dev:web
 
-dev: ## Run back-end and web console together (Ctrl-C stops both)
+dev: ## Run back-end + web UI together (Ctrl-C stops both)
 	@trap 'kill 0' INT TERM; \
 	OCPP_URL=$(OCPP_URL) HOST=$(HOST) PORT=$(PORT) npm run dev:server & \
 	npm run dev:web & \
 	wait
-
-start: ## Run the built back-end in production mode (no watch)
-	npm --workspace @ocpp-sim/server run start
 
 # --- Build -------------------------------------------------------------------
 
@@ -66,7 +62,7 @@ lint: ## Lint with biome
 format: ## Auto-format with biome
 	npm run format
 
-typecheck: ## Typecheck every workspace that defines a typecheck script
+typecheck: ## Typecheck every workspace
 	npm --workspaces run typecheck --if-present
 
 qa: lint typecheck test ## Lint + typecheck + test (run before pushing)
@@ -86,17 +82,6 @@ docker-run: ## Run the production image; pass AUTH_TOKEN=... to override
 
 docker-stop: ## Stop and remove the running container
 	-docker stop $(CONTAINER)
-
-docker-logs: ## Tail container logs
-	docker logs -f $(CONTAINER)
-
-# --- Monitoring stack --------------------------------------------------------
-
-monitoring-up: ## Start Prometheus + Grafana
-	docker compose up -d
-
-monitoring-down: ## Stop Prometheus + Grafana
-	docker compose down
 
 # --- Housekeeping ------------------------------------------------------------
 
