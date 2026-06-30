@@ -26,7 +26,12 @@ help: ## Show this help
 install: ## Install all workspace dependencies
 	npm install
 
-update: ## Deploy: git pull, rebuild image, restart the systemd service
+update: ## Deploy on the server: git pull, rebuild image, restart the systemd service
+	@if ! command -v systemctl >/dev/null 2>&1; then \
+		echo "make update is for the production server (needs systemd)."; \
+		echo "On a dev machine use \`make dev\` (or \`make docker-build && make docker-run\`)."; \
+		exit 1; \
+	fi
 	git pull
 	docker build -t $(IMAGE) .
 	sudo systemctl restart $(SERVICE)
