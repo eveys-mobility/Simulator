@@ -66,7 +66,12 @@ export function useLiveWs() {
                         break;
                     }
                     case 'state': {
-                        const p = msg.payload as { deviceId: string; online?: boolean; connectorId?: number; status?: string };
+                        const p = msg.payload as {
+                            deviceId: string;
+                            online?: boolean;
+                            connectorId?: number;
+                            status?: string;
+                        };
                         if (typeof p.online === 'boolean') {
                             setOnline(p.deviceId, p.online);
                             // Also dirty the devices query so other consumers refetch lazily.
@@ -184,5 +189,15 @@ export function useLiveWs() {
             if (reconnectTimer) clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setOnline, setConnectorStatus, applyTick, appendFrame, setBenchmarkProgress, evictMissing, recordCoalescedDrop, recordQueueOverflow, qc]);
+    }, [
+        setOnline,
+        setConnectorStatus,
+        applyTick,
+        appendFrame,
+        setBenchmarkProgress,
+        evictMissing,
+        recordCoalescedDrop,
+        recordQueueOverflow,
+        qc,
+    ]);
 }

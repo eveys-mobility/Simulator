@@ -38,13 +38,19 @@ export function ChargingProfiles({ deviceId }: Props) {
                 ) : !data || data.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                         No charging profiles installed. The CSMS sets profiles via{' '}
-                        <code className="font-mono text-xs bg-secondary/40 px-1 py-0.5 rounded">SetChargingProfile</code>;
-                        the simulator clamps the live power output to whatever the active profile allows.
+                        <code className="font-mono text-xs bg-secondary/40 px-1 py-0.5 rounded">
+                            SetChargingProfile
+                        </code>
+                        ; the simulator clamps the live power output to whatever the active profile
+                        allows.
                     </p>
                 ) : (
                     <div className="space-y-2">
                         {data.map((row) => (
-                            <ProfileRow key={`${row.connectorId}-${row.profile.chargingProfileId}-${row.profile.stackLevel}`} row={row} />
+                            <ProfileRow
+                                key={`${row.connectorId}-${row.profile.chargingProfileId}-${row.profile.stackLevel}`}
+                                row={row}
+                            />
                         ))}
                     </div>
                 )}
@@ -64,18 +70,42 @@ function ProfileRow({ row }: { row: { connectorId: number; profile: ChargingProf
                         #{profile.chargingProfileId}
                     </Badge>
                     <span className="text-sm font-medium">{profile.chargingProfilePurpose}</span>
-                    <Badge variant="outline" className="text-xs">stack {profile.stackLevel}</Badge>
-                    <Badge variant="outline" className="text-xs">{profile.chargingProfileKind}</Badge>
+                    <Badge variant="outline" className="text-xs">
+                        stack {profile.stackLevel}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                        {profile.chargingProfileKind}
+                    </Badge>
                 </div>
                 <span className="text-xs text-muted-foreground">
                     Connector {row.connectorId === 0 ? 'all' : row.connectorId}
                 </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                <Cell label="Initial limit" value={period0 ? `${period0.limit} ${profile.chargingSchedule.chargingRateUnit}` : '—'} />
-                <Cell label="Periods" value={String(profile.chargingSchedule.chargingSchedulePeriod.length)} />
-                <Cell label="Duration" value={profile.chargingSchedule.duration ? `${profile.chargingSchedule.duration}s` : '—'} />
-                <Cell label="Tx" value={profile.transactionId !== undefined ? `#${profile.transactionId}` : '—'} />
+                <Cell
+                    label="Initial limit"
+                    value={
+                        period0
+                            ? `${period0.limit} ${profile.chargingSchedule.chargingRateUnit}`
+                            : '—'
+                    }
+                />
+                <Cell
+                    label="Periods"
+                    value={String(profile.chargingSchedule.chargingSchedulePeriod.length)}
+                />
+                <Cell
+                    label="Duration"
+                    value={
+                        profile.chargingSchedule.duration
+                            ? `${profile.chargingSchedule.duration}s`
+                            : '—'
+                    }
+                />
+                <Cell
+                    label="Tx"
+                    value={profile.transactionId !== undefined ? `#${profile.transactionId}` : '—'}
+                />
             </div>
         </div>
     );

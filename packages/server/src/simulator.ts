@@ -103,8 +103,18 @@ function recomputeDcMeasurands(
 ): sim.SampledValue[] {
     const currentA = voltageV > 0 ? powerW / voltageV : 0;
     return [
-        { measurand: 'Energy.Active.Import.Register', value: String(Math.round(energyWh)), unit: 'Wh', location: 'Outlet' },
-        { measurand: 'Power.Active.Import', value: String(Math.round(powerW)), unit: 'W', location: 'Outlet' },
+        {
+            measurand: 'Energy.Active.Import.Register',
+            value: String(Math.round(energyWh)),
+            unit: 'Wh',
+            location: 'Outlet',
+        },
+        {
+            measurand: 'Power.Active.Import',
+            value: String(Math.round(powerW)),
+            unit: 'W',
+            location: 'Outlet',
+        },
         { measurand: 'Voltage', value: voltageV.toFixed(1), unit: 'V' },
         { measurand: 'Current.Import', value: currentA.toFixed(2), unit: 'A' },
         { measurand: 'SoC', value: socPct.toFixed(1), unit: 'Percent', location: 'EV' },
@@ -149,7 +159,11 @@ export class Simulator extends EventEmitter {
      *  back-to-back. */
     private stopped = false;
 
-    constructor(public readonly device: Device, store: Store, clientOptions: OcppClientOptions = {}) {
+    constructor(
+        public readonly device: Device,
+        store: Store,
+        clientOptions: OcppClientOptions = {},
+    ) {
         super();
         this.store = store;
         const numConnectors = device.type === 'DC' ? 2 : 1;
@@ -326,7 +340,10 @@ export class Simulator extends EventEmitter {
      * Simulator picks up effects (heartbeat cadence, etc.) the same way
      * a real ChangeConfiguration would.
      */
-    setOcppConfig(key: string, value: string): 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired' {
+    setOcppConfig(
+        key: string,
+        value: string,
+    ): 'Accepted' | 'Rejected' | 'NotSupported' | 'RebootRequired' {
         return this.config.set(key, value);
     }
 
@@ -374,7 +391,8 @@ export class Simulator extends EventEmitter {
 
     async startSession(connectorId: number, idTag: string, sessionRowId: number): Promise<number> {
         const c = this.requireConnector(connectorId);
-        if (c.transactionId) throw new Error(`connector ${connectorId} already has an active transaction`);
+        if (c.transactionId)
+            throw new Error(`connector ${connectorId} already has an active transaction`);
         if (!c.operative) throw new Error(`connector ${connectorId} is Inoperative`);
         // §5.5 ConcurrentTx: same idTag can only be on one active
         // session per device. Catches the operator-driven path that
@@ -466,11 +484,20 @@ export class Simulator extends EventEmitter {
         await this.setStatus(connectorId, 'Charging');
         c.tickTimer = setInterval(() => this.tick(connectorId), 1000);
         ocppActiveSessions.inc({ device_type: this.device.type });
-        this.emit('session', { type: 'started', connectorId, transactionId: txId, idTag, sessionRowId });
+        this.emit('session', {
+            type: 'started',
+            connectorId,
+            transactionId: txId,
+            idTag,
+            sessionRowId,
+        });
         return txId;
     }
 
-    async stopSession(connectorId: number, reason = 'Local'): Promise<{
+    async stopSession(
+        connectorId: number,
+        reason = 'Local',
+    ): Promise<{
         sessionRowId: number;
         energyWh: number;
         peakPowerKw: number;
@@ -497,7 +524,10 @@ export class Simulator extends EventEmitter {
         const peakPowerKw = c.peakPowerW / 1000;
         const durationSec = (Date.now() - c.startedAtMs) / 1000;
         ocppActiveSessions.dec({ device_type: this.device.type });
-        ocppSessionDurationSeconds.observe({ device_type: this.device.type, end_reason: reason }, durationSec);
+        ocppSessionDurationSeconds.observe(
+            { device_type: this.device.type, end_reason: reason },
+            durationSec,
+        );
         ocppSessionEnergyWh.observe({ device_type: this.device.type }, energyWh);
         await this.setStatus(connectorId, 'Finishing');
         // Stamp stop-time now so replay-on-reconnect carries the real
@@ -605,7 +635,10 @@ export class Simulator extends EventEmitter {
      * Returns the resulting `Authorize` idTagInfo status so the caller
      * can react.
      */
-    async swipeCard(connectorId: number, idTag: string): Promise<'started' | 'stopped' | 'rejected'> {
+    async swipeCard(
+        connectorId: number,
+        idTag: string,
+    ): Promise<'started' | 'stopped' | 'rejected'> {
         const c = this.requireConnector(connectorId);
         if (!this.client.isOnline()) throw new Error('device offline');
 
@@ -669,7 +702,12 @@ export class Simulator extends EventEmitter {
         clearAfterSeconds?: number;
         stopReason?: string;
     }): Promise<void> {
-        const { connectorId, errorCode = 'OtherError', clearAfterSeconds, stopReason = 'PowerLoss' } = args;
+        const {
+            connectorId,
+            errorCode = 'OtherError',
+            clearAfterSeconds,
+            stopReason = 'PowerLoss',
+        } = args;
         const c = this.requireConnector(connectorId);
         if (c.faultClearTimer) {
             clearTimeout(c.faultClearTimer);
@@ -835,10 +873,7 @@ export class Simulator extends EventEmitter {
                 // a CALLERROR forced an early return), arm a periodic
                 // retry so the queue can either drain or burn through
                 // its attempts budget without manual reconnect.
-                if (
-                    this.client.isOnline() &&
-                    this.store.countPendingMessages(this.device.id) > 0
-                ) {
+                if (this.client.isOnline() && this.store.countPendingMessages(this.device.id) > 0) {
                     this.scheduleDrainRetry();
                 }
             });
@@ -1057,7 +1092,11 @@ export class Simulator extends EventEmitter {
                 // here means dropping every entry but keeping the
                 // version (the CSMS tracks that). Accepted is the
                 // OCPP wire-status either way.
-                this.store.replaceLocalAuthList(this.device.id, this.store.getLocalListVersion(this.device.id), []);
+                this.store.replaceLocalAuthList(
+                    this.device.id,
+                    this.store.getLocalListVersion(this.device.id),
+                    [],
+                );
                 return { ok: true, result: { status: 'Accepted' } };
 
             case 'ReserveNow':
@@ -1095,11 +1134,17 @@ export class Simulator extends EventEmitter {
                 return { ok: true, result: this.handleGetCompositeSchedule(p) };
 
             default:
-                return { ok: false, code: 'NotImplemented', description: `${action} is not implemented` };
+                return {
+                    ok: false,
+                    code: 'NotImplemented',
+                    description: `${action} is not implemented`,
+                };
         }
     }
 
-    private handleSetChargingProfile(p: Record<string, unknown>): 'Accepted' | 'Rejected' | 'NotSupported' {
+    private handleSetChargingProfile(
+        p: Record<string, unknown>,
+    ): 'Accepted' | 'Rejected' | 'NotSupported' {
         const parsed = SetChargingProfileReqSchema.safeParse(p);
         if (!parsed.success) return 'Rejected';
         const { connectorId, csChargingProfiles: profile } = parsed.data;
@@ -1166,7 +1211,8 @@ export class Simulator extends EventEmitter {
         return all.filter(
             (r) =>
                 r.connectorId === connectorId ||
-                (r.profile.chargingProfilePurpose === 'ChargePointMaxProfile' && r.connectorId === 0),
+                (r.profile.chargingProfilePurpose === 'ChargePointMaxProfile' &&
+                    r.connectorId === 0),
         );
     }
 
@@ -1203,7 +1249,8 @@ export class Simulator extends EventEmitter {
         // reservation; any other tag is rejected. The startSession
         // guard re-checks this on the way through and consumes the
         // reservation when it matches.
-        const candidates = requestedConnectorId !== null ? [requestedConnectorId] : [...this.connectors.keys()];
+        const candidates =
+            requestedConnectorId !== null ? [requestedConnectorId] : [...this.connectors.keys()];
         const target = candidates.find((id) => {
             const c = this.connectors.get(id);
             if (!c || !c.operative || c.transactionId !== null) return false;
@@ -1232,13 +1279,16 @@ export class Simulator extends EventEmitter {
         if (requiresAuthorize) {
             const localEnabled = this.config.getBool('LocalAuthListEnabled') ?? true;
             const localPre = this.config.getBool('LocalPreAuthorize') ?? false;
-            const local = localEnabled && localPre
-                ? this.store.getLocalAuthEntry(this.device.id, idTag)
-                : null;
+            const local =
+                localEnabled && localPre
+                    ? this.store.getLocalAuthEntry(this.device.id, idTag)
+                    : null;
             if (local) {
                 // Honor expiryDate if set. An expired entry counts as
                 // Expired regardless of the stored status.
-                const expired = local.expiryDate ? Date.parse(local.expiryDate) < Date.now() : false;
+                const expired = local.expiryDate
+                    ? Date.parse(local.expiryDate) < Date.now()
+                    : false;
                 const effective = expired ? 'Expired' : local.status;
                 if (effective !== 'Accepted') return 'Rejected';
                 // Skip the CSMS round trip — the local list is authoritative.
@@ -1324,7 +1374,9 @@ export class Simulator extends EventEmitter {
         // chargers and keeps Toger interop testable without forcing a
         // sim-wide string-id refactor.
         if (typeof raw === 'string' && raw.length > 0) {
-            const active = [...this.connectors.entries()].filter(([, c]) => c.transactionId !== null);
+            const active = [...this.connectors.entries()].filter(
+                ([, c]) => c.transactionId !== null,
+            );
             // Also match by externalTransactionId (the CSMS-side string)
             // when set — preferred over connector-count fallback when
             // available because it's deterministic across multi-connector
@@ -1335,7 +1387,9 @@ export class Simulator extends EventEmitter {
                 return 'Accepted';
             }
             if (active.length === 1 && active[0]) {
-                void this.stopSession(active[0][0], 'Remote').catch((err) => this.emit('error', err));
+                void this.stopSession(active[0][0], 'Remote').catch((err) =>
+                    this.emit('error', err),
+                );
                 return 'Accepted';
             }
         }
@@ -1454,14 +1508,17 @@ export class Simulator extends EventEmitter {
         const stepMs = 50;
         for (let i = 0; i < stages.length; i++) {
             this.firmwareTimers.push(
-                setTimeout(() => {
-                    const status = stages[i];
-                    if (!status) return;
-                    this.firmwareStatus = status;
-                    this.client
-                        .call('FirmwareStatusNotification', { status })
-                        .catch(() => undefined);
-                }, (i + 1) * stepMs),
+                setTimeout(
+                    () => {
+                        const status = stages[i];
+                        if (!status) return;
+                        this.firmwareStatus = status;
+                        this.client
+                            .call('FirmwareStatusNotification', { status })
+                            .catch(() => undefined);
+                    },
+                    (i + 1) * stepMs,
+                ),
             );
         }
     }
@@ -1592,8 +1649,7 @@ export class Simulator extends EventEmitter {
         if (!parsed.success) return 'Rejected';
         const req = parsed.data;
 
-        const targets =
-            req.connectorId === 0 ? [...this.connectors.keys()] : [req.connectorId];
+        const targets = req.connectorId === 0 ? [...this.connectors.keys()] : [req.connectorId];
 
         // Filter for an eligible target. The OCPP status enum maps the
         // *first* failing reason — so we look for one that's outright
@@ -1611,7 +1667,12 @@ export class Simulator extends EventEmitter {
                 if (!firstReason) firstReason = 'Unavailable';
                 continue;
             }
-            if (c.transactionId !== null || c.status === 'Charging' || c.status === 'Preparing' || c.status === 'Finishing') {
+            if (
+                c.transactionId !== null ||
+                c.status === 'Charging' ||
+                c.status === 'Preparing' ||
+                c.status === 'Finishing'
+            ) {
                 if (!firstReason) firstReason = 'Occupied';
                 continue;
             }
@@ -1697,7 +1758,9 @@ export class Simulator extends EventEmitter {
         }
     }
 
-    private async handleTrigger(p: Record<string, unknown>): Promise<'Accepted' | 'Rejected' | 'NotImplemented'> {
+    private async handleTrigger(
+        p: Record<string, unknown>,
+    ): Promise<'Accepted' | 'Rejected' | 'NotImplemented'> {
         const requested = String(p.requestedMessage ?? '');
         const connectorId = typeof p.connectorId === 'number' ? p.connectorId : null;
         switch (requested) {
@@ -1778,9 +1841,10 @@ export class Simulator extends EventEmitter {
             socPct = r.frame.socPct;
             // If the cap reduced the power, re-emit measurands at the new
             // value so per-phase / SoC numbers stay consistent.
-            measurands = capW !== null && powerW < r.frame.powerW
-                ? recomputeDcMeasurands(c.energyWh, powerW, r.frame.voltageV, r.frame.socPct)
-                : r.measurands;
+            measurands =
+                capW !== null && powerW < r.frame.powerW
+                    ? recomputeDcMeasurands(c.energyWh, powerW, r.frame.voltageV, r.frame.socPct)
+                    : r.measurands;
             if (r.frame.completed) {
                 this.stopSession(connectorId, 'Local').catch((e) => this.emit('error', e));
                 return;

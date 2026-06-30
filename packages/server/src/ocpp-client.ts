@@ -182,7 +182,11 @@ export class OcppClient extends EventEmitter {
     }
 
     /** Send a CALL and resolve when the matching CALLRESULT arrives. */
-    async call<T>(action: string, payload: unknown, validate?: { parse: (raw: unknown) => T }): Promise<T> {
+    async call<T>(
+        action: string,
+        payload: unknown,
+        validate?: { parse: (raw: unknown) => T },
+    ): Promise<T> {
         if (!this.connected || !this.ws) throw new Error(`device ${this.device.id} not connected`);
         const id = uuid();
         const wire = encodeCall(id, action, payload);
@@ -217,7 +221,9 @@ export class OcppClient extends EventEmitter {
             // pre-shared password is the password. URL path already
             // carries the identifier, but the server still validates
             // it against the Authorization header.
-            const creds = Buffer.from(`${this.device.id}:${this.device.authPassword}`).toString('base64');
+            const creds = Buffer.from(`${this.device.id}:${this.device.authPassword}`).toString(
+                'base64',
+            );
             headers.Authorization = `Basic ${creds}`;
         }
         const isWss = url.startsWith('wss://');
@@ -282,7 +288,10 @@ export class OcppClient extends EventEmitter {
         try {
             frame = decodeFrame(raw);
         } catch (err) {
-            this.emit('error', err instanceof ProtocolError ? err : new ProtocolError('decode failed', raw));
+            this.emit(
+                'error',
+                err instanceof ProtocolError ? err : new ProtocolError('decode failed', raw),
+            );
             return;
         }
 
@@ -412,7 +421,11 @@ export class OcppClient extends EventEmitter {
 
     // ---- helpers used by Simulator ----
 
-    sendStatusNotification(connectorId: number, status: string, errorCode = 'NoError'): Promise<unknown> {
+    sendStatusNotification(
+        connectorId: number,
+        status: string,
+        errorCode = 'NoError',
+    ): Promise<unknown> {
         return this.call('StatusNotification', {
             connectorId,
             errorCode,
@@ -493,9 +506,18 @@ export class OcppClient extends EventEmitter {
      * Convenience for trigger-message paths and tests. Emits the same
      * minimal pair the v1 simulator did.
      */
-    sendMeterValue(connectorId: number, transactionId: number, energyWh: number, powerW: number): Promise<unknown> {
+    sendMeterValue(
+        connectorId: number,
+        transactionId: number,
+        energyWh: number,
+        powerW: number,
+    ): Promise<unknown> {
         return this.sendMeterValueRich(connectorId, transactionId, [
-            { value: String(Math.round(energyWh)), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
+            {
+                value: String(Math.round(energyWh)),
+                measurand: 'Energy.Active.Import.Register',
+                unit: 'Wh',
+            },
             { value: String(Math.round(powerW)), measurand: 'Power.Active.Import', unit: 'W' },
         ]);
     }

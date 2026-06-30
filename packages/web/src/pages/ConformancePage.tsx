@@ -117,8 +117,8 @@ export function ConformancePage() {
                         OCPP conformance
                     </h1>
                     <p className="text-sm text-muted-foreground">
-                        Bundled case suite. Each case runs against a fresh MockCsms + Simulator pair and asserts
-                        spec-correct behaviour.
+                        Bundled case suite. Each case runs against a fresh MockCsms + Simulator pair
+                        and asserts spec-correct behaviour.
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -186,7 +186,11 @@ function SummaryPill({
     const total = summary.passed + summary.failed;
     return (
         <Badge variant="outline" className={`text-xs gap-1.5 ${tone}`}>
-            {summary.failed === 0 ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {summary.failed === 0 ? (
+                <Check className="h-3 w-3" />
+            ) : (
+                <AlertTriangle className="h-3 w-3" />
+            )}
             {summary.passed}/{total} passed
             {summary.unimplemented > 0 && (
                 <span className="text-muted-foreground/80 ml-1">
@@ -205,11 +209,12 @@ function ProfileSummary({ list }: { list: CaseRow[] }) {
     const passed = ran.filter((r) => r.status === 'passed').length;
     const failed = ran.length - passed;
     const allUnimpl = ran.length > 0 && ran.every((r) => r.unimplemented);
-    const tone = failed > 0
-        ? 'bg-destructive/15 text-destructive border-destructive/30'
-        : allUnimpl
-          ? 'bg-secondary/40 text-muted-foreground border-border/60'
-          : 'bg-brand-green/15 text-brand-green border-brand-green/30';
+    const tone =
+        failed > 0
+            ? 'bg-destructive/15 text-destructive border-destructive/30'
+            : allUnimpl
+              ? 'bg-secondary/40 text-muted-foreground border-border/60'
+              : 'bg-brand-green/15 text-brand-green border-brand-green/30';
     return (
         <Badge variant="outline" className={`text-[10px] gap-1 ${tone}`}>
             {passed}/{ran.length}
@@ -236,7 +241,9 @@ function CaseRowView({
                 <StatusIcon status={row.status} running={running} unimplemented={isExpectedGap} />
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs text-muted-foreground truncate">{row.id}</span>
+                        <span className="font-mono text-xs text-muted-foreground truncate">
+                            {row.id}
+                        </span>
                         {row.durationMs !== undefined && (
                             <span className="text-[10px] text-muted-foreground/70 tabular-nums">
                                 {row.durationMs}ms
@@ -246,7 +253,10 @@ function CaseRowView({
                             <Badge
                                 variant="outline"
                                 className="text-[10px] gap-1 bg-secondary/40 border-border/60 text-muted-foreground"
-                                title={row.unimplementedReason ?? 'Feature not built; the simulator answers NotImplemented per spec'}
+                                title={
+                                    row.unimplementedReason ??
+                                    'Feature not built; the simulator answers NotImplemented per spec'
+                                }
                             >
                                 not built
                             </Badge>

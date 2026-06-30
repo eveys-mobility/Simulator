@@ -11,10 +11,13 @@ describe('computeAcMeasurands — 3-phase balanced', () => {
     });
 
     it('emits the three totals (Energy, Power, Frequency)', () => {
-        expect(measurands.find((m) => m.measurand === 'Energy.Active.Import.Register' && !m.phase)?.value).toBe(
-            '1234',
-        );
-        expect(measurands.find((m) => m.measurand === 'Power.Active.Import' && !m.phase)?.value).toBe('9000');
+        expect(
+            measurands.find((m) => m.measurand === 'Energy.Active.Import.Register' && !m.phase)
+                ?.value,
+        ).toBe('1234');
+        expect(
+            measurands.find((m) => m.measurand === 'Power.Active.Import' && !m.phase)?.value,
+        ).toBe('9000');
         expect(measurands.find((m) => m.measurand === 'Frequency' && !m.phase)?.value).toBe('50.0');
     });
 
@@ -47,11 +50,15 @@ describe('computeAcMeasurands — single-phase', () => {
     });
 
     it('emits exactly one phased Voltage row', () => {
-        expect(measurands.filter((m) => m.measurand === 'Voltage').map((v) => v.phase)).toEqual(['L1']);
+        expect(measurands.filter((m) => m.measurand === 'Voltage').map((v) => v.phase)).toEqual([
+            'L1',
+        ]);
     });
 
     it('all power is on L1', () => {
-        const l1 = measurands.find((m) => m.measurand === 'Power.Active.Import' && m.phase === 'L1');
+        const l1 = measurands.find(
+            (m) => m.measurand === 'Power.Active.Import' && m.phase === 'L1',
+        );
         expect(l1?.value).toBe('7000');
     });
 });
@@ -98,8 +105,12 @@ describe('computeDcMeasurands', () => {
             elapsedSec: 100,
             energyWh: 0,
         });
-        expect(measurands.find((m) => m.measurand === 'Voltage')?.value).toBe(frame.voltageV.toFixed(1));
-        expect(measurands.find((m) => m.measurand === 'Current.Import')?.value).toBe(frame.currentA.toFixed(2));
+        expect(measurands.find((m) => m.measurand === 'Voltage')?.value).toBe(
+            frame.voltageV.toFixed(1),
+        );
+        expect(measurands.find((m) => m.measurand === 'Current.Import')?.value).toBe(
+            frame.currentA.toFixed(2),
+        );
         expect(measurands.find((m) => m.measurand === 'Power.Active.Import')?.value).toBe(
             String(Math.round(frame.powerW)),
         );

@@ -112,7 +112,8 @@ export function BufferMemoryCard({ deviceId }: { deviceId: string }) {
                         {overflowRecent && overflow && (
                             <p className="text-xs text-destructive">
                                 Recent overflow: {overflow.lastDropped} oldest MeterValues row
-                                {overflow.lastDropped === 1 ? '' : 's'} dropped (cap {overflow.kept}).
+                                {overflow.lastDropped === 1 ? '' : 's'} dropped (cap {overflow.kept}
+                                ).
                             </p>
                         )}
                         <ul className="divide-y border rounded-md">
@@ -133,8 +134,8 @@ export function BufferMemoryCard({ deviceId }: { deviceId: string }) {
                     <>
                         This drops every buffered transaction frame for this device, including
                         StartTransaction and StopTransaction. The CSMS will never see what was in
-                        flight — the in-progress transaction record is lost. Type the word below
-                        to confirm.
+                        flight — the in-progress transaction record is lost. Type the word below to
+                        confirm.
                     </>
                 }
                 confirmText="Clear buffer"
@@ -177,7 +178,11 @@ function BufferRow({
                 )}
                 <span className="font-medium text-sm truncate">{row.action}</span>
                 {row.localTxId !== null && (
-                    <Badge variant="outline" className="text-[10px]" title="Started while offline; the real txId is assigned on drain">
+                    <Badge
+                        variant="outline"
+                        className="text-[10px]"
+                        title="Started while offline; the real txId is assigned on drain"
+                    >
                         local tx {row.localTxId}
                     </Badge>
                 )}

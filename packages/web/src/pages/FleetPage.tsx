@@ -104,8 +104,14 @@ export function FleetPage() {
                 <Stat
                     label="Queued"
                     value={summary.data?.pendingMessages ?? '—'}
-                    icon={<Inbox className={`h-4 w-4 ${(summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : 'text-muted-foreground'}`} />}
-                    accent={(summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : undefined}
+                    icon={
+                        <Inbox
+                            className={`h-4 w-4 ${(summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : 'text-muted-foreground'}`}
+                        />
+                    }
+                    accent={
+                        (summary.data?.pendingMessages ?? 0) > 0 ? 'text-brand-orange' : undefined
+                    }
                     sublabel={
                         (summary.data?.devicesWithPending ?? 0) > 0
                             ? `on ${summary.data?.devicesWithPending} device${summary.data?.devicesWithPending === 1 ? '' : 's'}`
@@ -152,10 +158,16 @@ function Stat({
         <Card>
             <CardContent className="p-4 flex items-center justify-between">
                 <div className="space-y-0.5">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-                    <div className={`text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {label}
+                    </div>
+                    <div className={`text-2xl font-semibold tabular-nums ${accent ?? ''}`}>
+                        {value}
+                    </div>
                     {sublabel && (
-                        <div className="text-[10px] text-muted-foreground tabular-nums">{sublabel}</div>
+                        <div className="text-[10px] text-muted-foreground tabular-nums">
+                            {sublabel}
+                        </div>
                     )}
                 </div>
                 {icon}
@@ -195,17 +207,21 @@ function BulkCreateCard({ onSuccess }: { onSuccess: () => void }) {
             </CardHeader>
             <CardContent className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                    Spawns N devices with a 200 ms stagger so the gateway sees them as a steady stream rather
-                    than a thundering herd. Cap is 200 per call.
+                    Spawns N devices with a 200 ms stagger so the gateway sees them as a steady
+                    stream rather than a thundering herd. Cap is 200 per call.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
                     <div className="space-y-1.5">
-                        <Label htmlFor="bulk-count" className="text-xs text-muted-foreground">Count</Label>
+                        <Label htmlFor="bulk-count" className="text-xs text-muted-foreground">
+                            Count
+                        </Label>
                         <Input
                             id="bulk-count"
                             type="number"
                             value={count}
-                            onChange={(e) => setCount(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+                            onChange={(e) =>
+                                setCount(Math.max(1, Math.min(200, Number(e.target.value) || 1)))
+                            }
                             min={1}
                             max={200}
                         />
@@ -213,7 +229,9 @@ function BulkCreateCard({ onSuccess }: { onSuccess: () => void }) {
                     <div className="space-y-1.5">
                         <Label className="text-xs text-muted-foreground">Type</Label>
                         <Select value={type} onValueChange={(v) => setType(v as DeviceType)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectTrigger>
+                                <SelectValue />
+                            </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="AC">AC</SelectItem>
                                 <SelectItem value="DC">DC</SelectItem>
@@ -221,7 +239,9 @@ function BulkCreateCard({ onSuccess }: { onSuccess: () => void }) {
                         </Select>
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
-                        <Label htmlFor="bulk-name" className="text-xs text-muted-foreground">Name prefix</Label>
+                        <Label htmlFor="bulk-name" className="text-xs text-muted-foreground">
+                            Name prefix
+                        </Label>
                         <Input
                             id="bulk-name"
                             value={namePrefix}
@@ -236,7 +256,9 @@ function BulkCreateCard({ onSuccess }: { onSuccess: () => void }) {
                         {create.isPending ? `Creating ${count}…` : `Create ${count} ${type}`}
                     </Button>
                     {lastResult && (
-                        <span className="text-sm text-brand-green">Created {lastResult.created} device(s).</span>
+                        <span className="text-sm text-brand-green">
+                            Created {lastResult.created} device(s).
+                        </span>
                     )}
                 </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
@@ -310,17 +332,22 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                                     onChange={(e) => setFraction(Number(e.target.value))}
                                     className="w-40 accent-brand-orange"
                                 />
-                                <span className="font-mono text-sm tabular-nums w-10 text-right">{fraction}%</span>
+                                <span className="font-mono text-sm tabular-nums w-10 text-right">
+                                    {fraction}%
+                                </span>
                             </div>
                         </div>
-                        <Button onClick={() => startFraction.mutate()} disabled={startFraction.isPending}>
+                        <Button
+                            onClick={() => startFraction.mutate()}
+                            disabled={startFraction.isPending}
+                        >
                             <PlayCircle className="h-4 w-4" />
                             Start {fraction}%
                         </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Picks a random subset of online + Available connectors (no active session) and starts a
-                        session on each.
+                        Picks a random subset of online + Available connectors (no active session)
+                        and starts a session on each.
                     </p>
                 </Section>
 
@@ -336,8 +363,8 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                         Reconnect all
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                        Closes every device's WebSocket. Each reconnects with exponential backoff — useful for
-                        stress-testing the gateway's recovery path.
+                        Closes every device's WebSocket. Each reconnects with exponential backoff —
+                        useful for stress-testing the gateway's recovery path.
                     </p>
                 </Section>
 
@@ -353,7 +380,9 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                                 id="hb"
                                 type="number"
                                 value={hbSeconds}
-                                onChange={(e) => setHbSeconds(Math.max(1, Number(e.target.value) || 1))}
+                                onChange={(e) =>
+                                    setHbSeconds(Math.max(1, Number(e.target.value) || 1))
+                                }
                                 min={1}
                                 max={86400}
                                 className="w-32"
@@ -378,9 +407,10 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                         Stop all sessions
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                        Ends every active charging session with reason=Local. Connectors return to Available; no
-                        fault. Use the per-device <span className="font-medium">Emergency stop</span> button for
-                        the actual fault-and-stop scenario.
+                        Ends every active charging session with reason=Local. Connectors return to
+                        Available; no fault. Use the per-device{' '}
+                        <span className="font-medium">Emergency stop</span> button for the actual
+                        fault-and-stop scenario.
                     </p>
                 </Section>
 
@@ -391,8 +421,8 @@ function FleetActionsCard({ onSuccess }: { onSuccess: () => void }) {
                     description={
                         <>
                             This ends every charging session across the entire fleet with reason{' '}
-                            <span className="font-mono font-medium text-foreground">Local</span>. Type the word
-                            below to confirm — the action is irreversible.
+                            <span className="font-mono font-medium text-foreground">Local</span>.
+                            Type the word below to confirm — the action is irreversible.
                         </>
                     }
                     confirmText="Stop all sessions"

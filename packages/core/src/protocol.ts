@@ -35,11 +35,20 @@ export function encodeError(
     description: string,
     details: unknown = {},
 ): string {
-    return JSON.stringify([MessageType.CALLERROR, id, code, description, details] satisfies CallErrorFrame);
+    return JSON.stringify([
+        MessageType.CALLERROR,
+        id,
+        code,
+        description,
+        details,
+    ] satisfies CallErrorFrame);
 }
 
 export class ProtocolError extends Error {
-    constructor(message: string, readonly raw: string) {
+    constructor(
+        message: string,
+        readonly raw: string,
+    ) {
         super(message);
         this.name = 'ProtocolError';
     }
@@ -56,7 +65,12 @@ export function decodeFrame(raw: string): Frame {
         throw new ProtocolError('frame must be an array of length >= 3', raw);
     }
     const [tid] = parsed;
-    if (tid === MessageType.CALL && parsed.length === 4 && typeof parsed[1] === 'string' && typeof parsed[2] === 'string') {
+    if (
+        tid === MessageType.CALL &&
+        parsed.length === 4 &&
+        typeof parsed[1] === 'string' &&
+        typeof parsed[2] === 'string'
+    ) {
         return parsed as CallFrame;
     }
     if (tid === MessageType.CALLRESULT && parsed.length === 3 && typeof parsed[1] === 'string') {
@@ -170,19 +184,21 @@ export const StopTransactionReqSchema = z.object({
     idTag: z.string().optional(),
     meterStop: z.number().int().nonnegative(),
     timestamp: z.string().datetime(),
-    reason: z.enum([
-        'EmergencyStop',
-        'EVDisconnected',
-        'HardReset',
-        'Local',
-        'Other',
-        'PowerLoss',
-        'Reboot',
-        'Remote',
-        'SoftReset',
-        'UnlockCommand',
-        'DeAuthorized',
-    ]).optional(),
+    reason: z
+        .enum([
+            'EmergencyStop',
+            'EVDisconnected',
+            'HardReset',
+            'Local',
+            'Other',
+            'PowerLoss',
+            'Reboot',
+            'Remote',
+            'SoftReset',
+            'UnlockCommand',
+            'DeAuthorized',
+        ])
+        .optional(),
     transactionData: z.array(z.unknown()).optional(),
 });
 

@@ -68,7 +68,10 @@ interface LiveState {
      *  OFFLINE_QUEUE_MAX; each trim emits a queueOverflow event we
      *  surface as a badge on the device page. `kept` is the post-trim
      *  cap (so the UI can show "queue at capacity: X"). */
-    queueOverflow: Map<string, { lastDropped: number; lastAt: number; total: number; kept: number }>;
+    queueOverflow: Map<
+        string,
+        { lastDropped: number; lastAt: number; total: number; kept: number }
+    >;
     setBenchmarkProgress: (p: BenchmarkProgress) => void;
     setOnline: (deviceId: string, online: boolean) => void;
     setConnectorStatus: (deviceId: string, connectorId: number, status: ConnectorStatus) => void;
@@ -217,9 +220,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             const connStatusMissing = [...s.connectorStatus.keys()].filter(
                 (k) => !keep.has(k.split(':')[0] ?? ''),
             );
-            const tickMissing = [...s.tick.keys()].filter(
-                (k) => !keep.has(k.split(':')[0] ?? ''),
-            );
+            const tickMissing = [...s.tick.keys()].filter((k) => !keep.has(k.split(':')[0] ?? ''));
             const coalesceMissing = [...s.coalesce.byDevice.keys()].filter((id) => !keep.has(id));
             const qoMissing = [...s.queueOverflow.keys()].filter((id) => !keep.has(id));
             if (

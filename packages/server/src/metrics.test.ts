@@ -19,21 +19,27 @@ describe('metrics', () => {
     it('exposes the registry in Prometheus text format', async () => {
         ocppCallTotal.inc({ action: 'BootNotification', direction: 'out', device_type: 'AC' });
         const body = await renderMetrics();
-        expect(body).toMatch(/ocpp_call_total{action="BootNotification",direction="out",device_type="AC"} 1/);
+        expect(body).toMatch(
+            /ocpp_call_total{action="BootNotification",direction="out",device_type="AC"} 1/,
+        );
     });
 
     it('Counter increments and exports cumulative value', async () => {
         ocppCallTotal.inc({ action: 'Heartbeat', direction: 'out', device_type: 'AC' });
         ocppCallTotal.inc({ action: 'Heartbeat', direction: 'out', device_type: 'AC' });
         const body = await renderMetrics();
-        expect(body).toMatch(/ocpp_call_total{action="Heartbeat",direction="out",device_type="AC"} 2/);
+        expect(body).toMatch(
+            /ocpp_call_total{action="Heartbeat",direction="out",device_type="AC"} 2/,
+        );
     });
 
     it('Histogram observes record samples in buckets', async () => {
         ocppCallLatencySeconds.observe({ action: 'MeterValues', device_type: 'DC' }, 0.123);
         ocppCallLatencySeconds.observe({ action: 'MeterValues', device_type: 'DC' }, 0.456);
         const body = await renderMetrics();
-        expect(body).toMatch(/ocpp_call_latency_seconds_count{action="MeterValues",device_type="DC"} 2/);
+        expect(body).toMatch(
+            /ocpp_call_latency_seconds_count{action="MeterValues",device_type="DC"} 2/,
+        );
     });
 
     it('Gauge set + dec/inc behave correctly', async () => {

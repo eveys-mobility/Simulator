@@ -1,5 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, ChevronLeft, ChevronRight, Inbox, LayoutGrid, List, Plus, Search, Trash2 } from 'lucide-react';
+import {
+    ArrowRight,
+    ChevronLeft,
+    ChevronRight,
+    Inbox,
+    LayoutGrid,
+    List,
+    Plus,
+    Search,
+    Trash2,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LiveDot } from '@/components/LiveDot';
@@ -105,7 +115,9 @@ export function DevicesPage() {
                 const matches = d.connectors.some((c) => {
                     const status = connectorStatus.get(liveKey(d.id, c.id)) ?? c.status;
                     if (connectorFilter === 'Other') {
-                        return status !== 'Charging' && status !== 'Available' && status !== 'Faulted';
+                        return (
+                            status !== 'Charging' && status !== 'Available' && status !== 'Faulted'
+                        );
                     }
                     return status === connectorFilter;
                 });
@@ -132,7 +144,9 @@ export function DevicesPage() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                     <h1 className="text-2xl font-semibold">Devices</h1>
-                    <p className="text-sm text-muted-foreground">Each device is one OCPP charge point.</p>
+                    <p className="text-sm text-muted-foreground">
+                        Each device is one OCPP charge point.
+                    </p>
                 </div>
                 <Button onClick={() => setShowNew((v) => !v)}>
                     <Plus className="h-4 w-4" /> New device
@@ -162,8 +176,13 @@ export function DevicesPage() {
                             </div>
                         </FilterField>
                         <FilterField label="Type">
-                            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
-                                <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
+                            <Select
+                                value={typeFilter}
+                                onValueChange={(v) => setTypeFilter(v as TypeFilter)}
+                            >
+                                <SelectTrigger className="h-8 w-24 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
                                     <SelectItem value="AC">AC</SelectItem>
@@ -172,8 +191,13 @@ export function DevicesPage() {
                             </Select>
                         </FilterField>
                         <FilterField label="Status">
-                            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-                                <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+                            >
+                                <SelectTrigger className="h-8 w-28 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
                                     <SelectItem value="online">Online</SelectItem>
@@ -186,7 +210,9 @@ export function DevicesPage() {
                                 value={connectorFilter}
                                 onValueChange={(v) => setConnectorFilter(v as ConnectorFilter)}
                             >
-                                <SelectTrigger className="h-8 w-32 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className="h-8 w-32 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
                                     <SelectItem value="Charging">Charging</SelectItem>
@@ -201,10 +227,14 @@ export function DevicesPage() {
                                 value={String(pageSize)}
                                 onValueChange={(v) => setPageSizePersisted(Number(v))}
                             >
-                                <SelectTrigger className="h-8 w-20 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className="h-8 w-20 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
                                 <SelectContent>
                                     {PAGE_SIZES.map((n) => (
-                                        <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                                        <SelectItem key={n} value={String(n)}>
+                                            {n}
+                                        </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -285,7 +315,8 @@ export function DevicesPage() {
                         <ChevronLeft className="h-3.5 w-3.5" /> Prev
                     </Button>
                     <span className="text-xs text-muted-foreground tabular-nums">
-                        {offset + 1}–{Math.min(offset + paged.length, filtered.length)} of {filtered.length}
+                        {offset + 1}–{Math.min(offset + paged.length, filtered.length)} of{' '}
+                        {filtered.length}
                         <span className="mx-2 text-muted-foreground/60">·</span>
                         Page {page + 1} of {totalPages}
                     </span>
@@ -309,9 +340,15 @@ export function DevicesPage() {
                 description={
                     pendingDelete ? (
                         <>
-                            Remove <span className="font-medium text-foreground">{pendingDelete.displayName}</span>{' '}
-                            <span className="font-mono text-xs text-muted-foreground">({pendingDelete.id})</span>{' '}
-                            from the simulator? Its session history is preserved on the Sessions page.
+                            Remove{' '}
+                            <span className="font-medium text-foreground">
+                                {pendingDelete.displayName}
+                            </span>{' '}
+                            <span className="font-mono text-xs text-muted-foreground">
+                                ({pendingDelete.id})
+                            </span>{' '}
+                            from the simulator? Its session history is preserved on the Sessions
+                            page.
                         </>
                     ) : null
                 }
@@ -329,7 +366,9 @@ export function DevicesPage() {
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="flex items-center gap-1.5">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</Label>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {label}
+            </Label>
             {children}
         </div>
     );
@@ -361,14 +400,26 @@ function GridView({ devices, onlineMap, connectorStatus, onDelete, deleting }: V
                             <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
                                 <div className="space-y-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                        <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>{d.type}</Badge>
-                                        <CardTitle className="text-base truncate">{d.displayName}</CardTitle>
+                                        <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>
+                                            {d.type}
+                                        </Badge>
+                                        <CardTitle className="text-base truncate">
+                                            {d.displayName}
+                                        </CardTitle>
                                     </div>
-                                    <p className="font-mono text-xs text-muted-foreground truncate">{d.id}</p>
+                                    <p className="font-mono text-xs text-muted-foreground truncate">
+                                        {d.id}
+                                    </p>
                                 </div>
                                 <div className="flex flex-col items-end gap-1">
-                                    <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
-                                        <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
+                                    <Badge
+                                        variant={online ? 'online' : 'offline'}
+                                        className="gap-1.5"
+                                    >
+                                        <LiveDot
+                                            pulse={online || charging}
+                                            tone={online ? 'green' : 'gray'}
+                                        />
                                         {online ? 'Online' : 'Offline'}
                                     </Badge>
                                     {(d.pendingQueueDepth ?? 0) > 0 && (
@@ -439,23 +490,41 @@ function TableView({ devices, onlineMap, connectorStatus, onDelete, deleting }: 
                         {devices.map((d) => {
                             const online = onlineMap.get(d.id) ?? d.online;
                             const charging = d.connectors.some(
-                                (c) => (connectorStatus.get(liveKey(d.id, c.id)) ?? c.status) === 'Charging',
+                                (c) =>
+                                    (connectorStatus.get(liveKey(d.id, c.id)) ?? c.status) ===
+                                    'Charging',
                             );
                             return (
-                                <tr key={d.id} className="border-b last:border-b-0 hover:bg-secondary/30">
+                                <tr
+                                    key={d.id}
+                                    className="border-b last:border-b-0 hover:bg-secondary/30"
+                                >
                                     <td className="px-3 py-2">
-                                        <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>{d.type}</Badge>
+                                        <Badge variant={d.type === 'DC' ? 'dc' : 'ac'}>
+                                            {d.type}
+                                        </Badge>
                                     </td>
                                     <td className="px-3 py-2">
-                                        <Link to={`/devices/${d.id}`} className="hover:text-brand-orange">
+                                        <Link
+                                            to={`/devices/${d.id}`}
+                                            className="hover:text-brand-orange"
+                                        >
                                             {d.displayName}
                                         </Link>
                                     </td>
-                                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{d.id}</td>
+                                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                                        {d.id}
+                                    </td>
                                     <td className="px-3 py-2">
                                         <div className="flex items-center gap-1.5">
-                                            <Badge variant={online ? 'online' : 'offline'} className="gap-1.5">
-                                                <LiveDot pulse={online || charging} tone={online ? 'green' : 'gray'} />
+                                            <Badge
+                                                variant={online ? 'online' : 'offline'}
+                                                className="gap-1.5"
+                                            >
+                                                <LiveDot
+                                                    pulse={online || charging}
+                                                    tone={online ? 'green' : 'gray'}
+                                                />
                                                 {online ? 'Online' : 'Offline'}
                                             </Badge>
                                             {(d.pendingQueueDepth ?? 0) > 0 && (
@@ -471,14 +540,22 @@ function TableView({ devices, onlineMap, connectorStatus, onDelete, deleting }: 
                                         </div>
                                     </td>
                                     <td className="px-3 py-2">
-                                        <ConnectorsRow device={d} connectorStatus={connectorStatus} dense />
+                                        <ConnectorsRow
+                                            device={d}
+                                            connectorStatus={connectorStatus}
+                                            dense
+                                        />
                                     </td>
-                                    <td className="px-3 py-2 text-right tabular-nums">{d.maxPowerKw}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">
+                                        {d.maxPowerKw}
+                                    </td>
                                     <td className="px-3 py-2 text-xs">{d.phaseMode}</td>
                                     <td className="px-3 py-2 text-right">
                                         <div className="inline-flex items-center gap-1">
                                             <Link to={`/devices/${d.id}`}>
-                                                <Button variant="ghost" size="sm">Open</Button>
+                                                <Button variant="ghost" size="sm">
+                                                    Open
+                                                </Button>
                                             </Link>
                                             <Button
                                                 variant="ghost"
@@ -519,10 +596,10 @@ function ConnectorsRow({
                     status === 'Charging'
                         ? 'green'
                         : status === 'Faulted'
-                            ? 'red'
-                            : status === 'Available'
-                                ? 'gray'
-                                : 'orange';
+                          ? 'red'
+                          : status === 'Available'
+                            ? 'gray'
+                            : 'orange';
                 return (
                     <span
                         key={c.id}
@@ -532,7 +609,11 @@ function ConnectorsRow({
                             'bg-secondary/40 text-foreground',
                         )}
                     >
-                        <LiveDot pulse={status === 'Charging'} tone={tone} className="h-1.5 w-1.5" />
+                        <LiveDot
+                            pulse={status === 'Charging'}
+                            tone={tone}
+                            className="h-1.5 w-1.5"
+                        />
                         <span className="font-medium">{c.id}</span>
                         {!dense && <span className="text-muted-foreground">{status}</span>}
                     </span>
@@ -566,15 +647,27 @@ function NewDeviceForm({
                 >
                     <div className="flex-1 space-y-1">
                         <label className="text-xs text-muted-foreground">Display name</label>
-                        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Lobby AC #1" />
+                        <Input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="e.g. Lobby AC #1"
+                        />
                     </div>
                     <div className="space-y-1">
                         <label className="text-xs text-muted-foreground">Type</label>
                         <div className="flex gap-1">
-                            <Button type="button" variant={type === 'AC' ? 'default' : 'outline'} onClick={() => setType('AC')}>
+                            <Button
+                                type="button"
+                                variant={type === 'AC' ? 'default' : 'outline'}
+                                onClick={() => setType('AC')}
+                            >
                                 AC
                             </Button>
-                            <Button type="button" variant={type === 'DC' ? 'default' : 'outline'} onClick={() => setType('DC')}>
+                            <Button
+                                type="button"
+                                variant={type === 'DC' ? 'default' : 'outline'}
+                                onClick={() => setType('DC')}
+                            >
                                 DC
                             </Button>
                         </div>

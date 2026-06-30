@@ -209,7 +209,8 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         readonly: true,
         rebootRequired: false,
         default: '1',
-        description: 'Physical connector count on this charge point. Read-only — derived from hardware.',
+        description:
+            'Physical connector count on this charge point. Read-only — derived from hardware.',
     },
     {
         key: 'ResetRetries',
@@ -260,8 +261,7 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         readonly: false,
         rebootRequired: false,
         default: 'Energy.Active.Import.Register',
-        description:
-            'Measurands attached to StopTransaction transactionData on per-sample ticks.',
+        description: 'Measurands attached to StopTransaction transactionData on per-sample ticks.',
     },
     {
         key: 'StopTxnSampledDataMaxLength',
@@ -276,7 +276,8 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         type: 'csl',
         readonly: true,
         rebootRequired: false,
-        default: 'Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger',
+        default:
+            'Core,FirmwareManagement,LocalAuthListManagement,Reservation,SmartCharging,RemoteTrigger',
         description: 'OCPP 1.6 profiles this CP implements. Read-only — set by the firmware build.',
     },
     {
@@ -319,7 +320,8 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         readonly: false,
         rebootRequired: false,
         default: '0',
-        description: 'Seconds between WS-level ping frames. 0 disables; useful through aggressive NATs.',
+        description:
+            'Seconds between WS-level ping frames. 0 disables; useful through aggressive NATs.',
     },
 
     // LocalAuthListManagement
@@ -374,7 +376,8 @@ export const STANDARD_CONFIG_KEYS: ConfigKeySpec[] = [
         readonly: true,
         rebootRequired: false,
         default: 'Current,Power',
-        description: 'chargingRateUnit values the CP accepts in a charging profile (Current=A, Power=W).',
+        description:
+            'chargingRateUnit values the CP accepts in a charging profile (Current=A, Power=W).',
     },
     {
         key: 'ChargingScheduleMaxPeriods',
@@ -411,7 +414,8 @@ export function validateConfigValue(spec: ConfigKeySpec, value: string): string 
             return null;
         }
         case 'bool':
-            if (value !== 'true' && value !== 'false') return `${spec.key} must be 'true' or 'false'`;
+            if (value !== 'true' && value !== 'false')
+                return `${spec.key} must be 'true' or 'false'`;
             return null;
         case 'csl':
         case 'string':

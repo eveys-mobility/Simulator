@@ -69,7 +69,8 @@ export function ManualControls({ device }: Props) {
     // immediately on plug-in / plug-out / fault, so the active button
     // reflects the device's actual state, not just what we last asked for.
     const liveStatus = useLiveStore((s) => s.connectorStatus.get(liveKey(device.id, connectorId)));
-    const status = liveStatus ?? device.connectors.find((c) => c.id === connectorId)?.status ?? 'Available';
+    const status =
+        liveStatus ?? device.connectors.find((c) => c.id === connectorId)?.status ?? 'Available';
     const isPluggedIn = status !== 'Available' && status !== 'Faulted' && status !== 'Unavailable';
     const isCharging = status === 'Charging';
     const isFaulted = status === 'Faulted';
@@ -139,7 +140,9 @@ export function ManualControls({ device }: Props) {
                     <CardTitle className="text-base flex items-center gap-2">
                         <Wrench className="h-4 w-4" /> Manual controls
                     </CardTitle>
-                    <Badge variant={online ? 'online' : 'offline'}>{online ? 'Online' : 'Offline'}</Badge>
+                    <Badge variant={online ? 'online' : 'offline'}>
+                        {online ? 'Online' : 'Offline'}
+                    </Badge>
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -147,7 +150,10 @@ export function ManualControls({ device }: Props) {
                 {device.connectors.length > 1 && (
                     <div className="grid grid-cols-2 gap-2 max-w-xs">
                         <div className="space-y-1.5">
-                            <Label htmlFor="connector-select" className="text-xs text-muted-foreground">
+                            <Label
+                                htmlFor="connector-select"
+                                className="text-xs text-muted-foreground"
+                            >
                                 Connector
                             </Label>
                             <Select
@@ -187,7 +193,11 @@ export function ManualControls({ device }: Props) {
                         <Plug className="h-4 w-4 rotate-180" /> Plug out
                     </Button>
                     <span className="text-xs text-muted-foreground ml-1">
-                        {isFaulted ? 'Connector faulted' : isPluggedIn ? 'Cable plugged in' : 'No cable'}
+                        {isFaulted
+                            ? 'Connector faulted'
+                            : isPluggedIn
+                              ? 'Cable plugged in'
+                              : 'No cable'}
                     </span>
                 </Section>
 
@@ -206,7 +216,8 @@ export function ManualControls({ device }: Props) {
                         </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Same tag swipe stops a running session; first swipe with a fresh tag starts one.
+                        Same tag swipe stops a running session; first swipe with a fresh tag starts
+                        one.
                     </p>
                 </Section>
 
@@ -230,7 +241,9 @@ export function ManualControls({ device }: Props) {
                             </Select>
                         </div>
                         <div className="space-y-1.5">
-                            <Label className="text-xs text-muted-foreground">Auto-clear (seconds)</Label>
+                            <Label className="text-xs text-muted-foreground">
+                                Auto-clear (seconds)
+                            </Label>
                             <Input
                                 type="number"
                                 value={autoClear}
@@ -325,7 +338,11 @@ export function ManualControls({ device }: Props) {
     );
 }
 
-function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function Section({
+    icon,
+    title,
+    children,
+}: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
     return (
         <div className="space-y-2">
             <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">

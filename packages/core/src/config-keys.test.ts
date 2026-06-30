@@ -9,7 +9,9 @@ describe('STANDARD_CONFIG_KEYS', () => {
         const missing = STANDARD_CONFIG_KEYS.filter(
             (k) => !k.description || k.description.trim().length < 10,
         ).map((k) => k.key);
-        expect(missing, `keys with missing/too-short description: ${missing.join(', ')}`).toEqual([]);
+        expect(missing, `keys with missing/too-short description: ${missing.join(', ')}`).toEqual(
+            [],
+        );
     });
 
     it('descriptions stay terse — operator-facing one-liners, not spec quotes', () => {

@@ -44,12 +44,42 @@ interface PanelSpec {
  * 7 Errors/sec      8 Frame throughput in/out
  */
 const PANELS: PanelSpec[] = [
-    { panelId: 5, title: 'CALL rate by action', description: 'OCPP CALLs per second, broken down by action.', colSpan: 2 },
-    { panelId: 6, title: 'p99 CALL latency by action', description: 'Round-trip latency p99 for each OCPP action over the run window.', colSpan: 2 },
-    { panelId: 7, title: 'Errors / sec', description: 'CALLERROR + timeout events grouped by action and error code.', colSpan: 1 },
-    { panelId: 8, title: 'Frame throughput', description: 'Total frames in/out per second.', colSpan: 1 },
-    { panelId: 3, title: 'Active sessions', description: 'Currently-charging connectors during the run window.', colSpan: 1 },
-    { panelId: 2, title: 'Online devices', description: 'Devices online during the run window.', colSpan: 1 },
+    {
+        panelId: 5,
+        title: 'CALL rate by action',
+        description: 'OCPP CALLs per second, broken down by action.',
+        colSpan: 2,
+    },
+    {
+        panelId: 6,
+        title: 'p99 CALL latency by action',
+        description: 'Round-trip latency p99 for each OCPP action over the run window.',
+        colSpan: 2,
+    },
+    {
+        panelId: 7,
+        title: 'Errors / sec',
+        description: 'CALLERROR + timeout events grouped by action and error code.',
+        colSpan: 1,
+    },
+    {
+        panelId: 8,
+        title: 'Frame throughput',
+        description: 'Total frames in/out per second.',
+        colSpan: 1,
+    },
+    {
+        panelId: 3,
+        title: 'Active sessions',
+        description: 'Currently-charging connectors during the run window.',
+        colSpan: 1,
+    },
+    {
+        panelId: 2,
+        title: 'Online devices',
+        description: 'Devices online during the run window.',
+        colSpan: 1,
+    },
 ];
 
 /**
@@ -74,7 +104,11 @@ export function BenchmarkRunDetailPage() {
     const { id = '' } = useParams<{ id: string }>();
     const runId = Number(id);
 
-    const { data: run, isLoading, error } = useQuery({
+    const {
+        data: run,
+        isLoading,
+        error,
+    } = useQuery({
         queryKey: ['benchmark-runs', runId],
         queryFn: () => api.getBenchmarkRun(runId),
         enabled: Number.isFinite(runId),
@@ -85,7 +119,9 @@ export function BenchmarkRunDetailPage() {
     });
 
     // Live progress stream for the in-flight case.
-    const progress = useLiveStore((s) => (Number.isFinite(runId) ? s.benchmarkProgress.get(runId) : undefined));
+    const progress = useLiveStore((s) =>
+        Number.isFinite(runId) ? s.benchmarkProgress.get(runId) : undefined,
+    );
 
     if (!Number.isFinite(runId)) return <p className="text-sm text-destructive">Invalid run id.</p>;
     if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -93,7 +129,8 @@ export function BenchmarkRunDetailPage() {
 
     const startedMs = new Date(run.startedAt).getTime();
     const endedMs = run.endedAt ? new Date(run.endedAt).getTime() : Date.now();
-    const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    const isDark =
+        typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
     return (
         <div className="space-y-6">
@@ -132,9 +169,11 @@ export function BenchmarkRunDetailPage() {
                     <h2 className="text-lg font-semibold">Analytics</h2>
                 </div>
                 <p className="text-sm text-muted-foreground mb-4">
-                    Live Grafana panels scoped to this run's window. Bring the stack up with
-                    {' '}<code className="font-mono text-xs px-1 py-0.5 rounded bg-secondary/40">cd v2 && docker compose up -d</code>
-                    {' '}if these don't load.
+                    Live Grafana panels scoped to this run's window. Bring the stack up with{' '}
+                    <code className="font-mono text-xs px-1 py-0.5 rounded bg-secondary/40">
+                        cd v2 && docker compose up -d
+                    </code>{' '}
+                    if these don't load.
                 </p>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {PANELS.map((p) => (
@@ -155,7 +194,13 @@ function ScenarioCard({
     progress,
 }: {
     run: BenchmarkRun;
-    progress?: { devicesOnline: number; sessionsActive: number; sessionsStarted: number; sessionsStopped: number; errors: number };
+    progress?: {
+        devicesOnline: number;
+        sessionsActive: number;
+        sessionsStarted: number;
+        sessionsStopped: number;
+        errors: number;
+    };
 }) {
     const summary = run.summary;
     return (
@@ -165,11 +210,23 @@ function ScenarioCard({
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    <Field label="Devices" value={`${run.scenario.deviceCount} ${run.scenario.deviceMix}`} />
+                    <Field
+                        label="Devices"
+                        value={`${run.scenario.deviceCount} ${run.scenario.deviceMix}`}
+                    />
                     <Field label="Ramp-up" value={`${run.scenario.rampUpSeconds}s`} />
-                    <Field label="Sessions / hr / dev" value={String(run.scenario.sessionsPerHourPerDevice)} />
-                    <Field label="Session duration" value={`${run.scenario.sessionDurationSeconds}s`} />
-                    <Field label="Meter cadence" value={`${run.scenario.meterValueIntervalSeconds}s`} />
+                    <Field
+                        label="Sessions / hr / dev"
+                        value={String(run.scenario.sessionsPerHourPerDevice)}
+                    />
+                    <Field
+                        label="Session duration"
+                        value={`${run.scenario.sessionDurationSeconds}s`}
+                    />
+                    <Field
+                        label="Meter cadence"
+                        value={`${run.scenario.meterValueIntervalSeconds}s`}
+                    />
                     <Field label="Total duration" value={`${run.scenario.totalDurationSeconds}s`} />
                     <Field label="Auto-cleanup" value={run.scenario.autoCleanup ? 'Yes' : 'No'} />
                     <Field label="OCPP URL" value={run.scenario.ocppUrl ?? '(default)'} mono />
@@ -195,7 +252,11 @@ function ScenarioCard({
                 ) : progress ? (
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 border-t pt-4">
                         <Stat label="Devices online" value={progress.devicesOnline} />
-                        <Stat label="Active sessions" value={progress.sessionsActive} accent="text-brand-orange" />
+                        <Stat
+                            label="Active sessions"
+                            value={progress.sessionsActive}
+                            accent="text-brand-orange"
+                        />
                         <Stat label="Sessions started" value={progress.sessionsStarted} />
                         <Stat label="Sessions stopped" value={progress.sessionsStopped} />
                         <Stat
@@ -255,7 +316,11 @@ function StatusBadge({ status }: { status: BenchmarkRun['status'] }) {
     }
     return (
         <Badge variant="destructive" className="gap-1.5">
-            {status === 'failed' ? <XCircle className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {status === 'failed' ? (
+                <XCircle className="h-3 w-3" />
+            ) : (
+                <AlertTriangle className="h-3 w-3" />
+            )}
             {status === 'failed' ? 'Failed' : status}
         </Badge>
     );
@@ -265,7 +330,9 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
     return (
         <div>
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-            <div className={cn('text-foreground', mono && 'font-mono text-xs break-all')}>{value}</div>
+            <div className={cn('text-foreground', mono && 'font-mono text-xs break-all')}>
+                {value}
+            </div>
         </div>
     );
 }

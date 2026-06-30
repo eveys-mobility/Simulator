@@ -101,8 +101,9 @@ export function BenchmarkPage() {
             <div>
                 <h1 className="text-2xl font-semibold">Benchmark</h1>
                 <p className="text-sm text-muted-foreground">
-                    Drive synthetic load against the OCPP gateway. Scenarios spawn <code className="font-mono text-xs">bench_*</code> devices,
-                    run for a fixed duration, then clean up.
+                    Drive synthetic load against the OCPP gateway. Scenarios spawn{' '}
+                    <code className="font-mono text-xs">bench_*</code> devices, run for a fixed
+                    duration, then clean up.
                 </p>
             </div>
 
@@ -149,7 +150,11 @@ function LiveMetricsTab() {
                             <Stat label="Elapsed" value={`${latest.t}s`} />
                             <Stat label="Online" value={latest.devicesOnline} />
                             <Stat label="Active sessions" value={latest.sessionsActive} />
-                            <Stat label="Errors" value={latest.errors} accent={latest.errors > 0 ? 'text-destructive' : undefined} />
+                            <Stat
+                                label="Errors"
+                                value={latest.errors}
+                                accent={latest.errors > 0 ? 'text-destructive' : undefined}
+                            />
                         </div>
                     ) : (
                         <p className="text-sm text-muted-foreground">
@@ -167,7 +172,8 @@ function LiveMetricsTab() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                     <p className="text-sm text-muted-foreground">
-                        For deeper analysis (rate, latency p99, per-action errors, frame throughput), open the Grafana stack.
+                        For deeper analysis (rate, latency p99, per-action errors, frame
+                        throughput), open the Grafana stack.
                     </p>
                     <div className="flex gap-2">
                         <a href="http://localhost:3000" target="_blank" rel="noreferrer">
@@ -182,7 +188,8 @@ function LiveMetricsTab() {
                         </a>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Bring the stack up with <code className="font-mono">cd v2 && docker compose up -d</code>.
+                        Bring the stack up with{' '}
+                        <code className="font-mono">cd v2 && docker compose up -d</code>.
                     </p>
                 </CardContent>
             </Card>
@@ -265,17 +272,35 @@ function RunTab() {
                         className="grid grid-cols-1 sm:grid-cols-2 gap-3"
                     >
                         <Field label="Name">
-                            <Input value={form.name} onChange={set('name')} required maxLength={80} />
+                            <Input
+                                value={form.name}
+                                onChange={set('name')}
+                                required
+                                maxLength={80}
+                            />
                         </Field>
                         <Field label="Device count">
-                            <Input type="number" value={form.deviceCount} onChange={set('deviceCount')} min={1} max={500} />
+                            <Input
+                                type="number"
+                                value={form.deviceCount}
+                                onChange={set('deviceCount')}
+                                min={1}
+                                max={500}
+                            />
                         </Field>
                         <Field label="Mix">
                             <Select
                                 value={form.deviceMix}
-                                onValueChange={(v) => setForm((f) => ({ ...f, deviceMix: v as FormState['deviceMix'] }))}
+                                onValueChange={(v) =>
+                                    setForm((f) => ({
+                                        ...f,
+                                        deviceMix: v as FormState['deviceMix'],
+                                    }))
+                                }
                             >
-                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="AC">AC only</SelectItem>
                                     <SelectItem value="DC">DC only</SelectItem>
@@ -295,19 +320,50 @@ function RunTab() {
                             />
                         </Field>
                         <Field label="Ramp-up (s)">
-                            <Input type="number" value={form.rampUpSeconds} onChange={set('rampUpSeconds')} min={0} max={3600} />
+                            <Input
+                                type="number"
+                                value={form.rampUpSeconds}
+                                onChange={set('rampUpSeconds')}
+                                min={0}
+                                max={3600}
+                            />
                         </Field>
                         <Field label="Sessions / hour / device">
-                            <Input type="number" value={form.sessionsPerHourPerDevice} onChange={set('sessionsPerHourPerDevice')} step="0.1" min={0} max={60} />
+                            <Input
+                                type="number"
+                                value={form.sessionsPerHourPerDevice}
+                                onChange={set('sessionsPerHourPerDevice')}
+                                step="0.1"
+                                min={0}
+                                max={60}
+                            />
                         </Field>
                         <Field label="Session duration (s)">
-                            <Input type="number" value={form.sessionDurationSeconds} onChange={set('sessionDurationSeconds')} min={5} max={86400} />
+                            <Input
+                                type="number"
+                                value={form.sessionDurationSeconds}
+                                onChange={set('sessionDurationSeconds')}
+                                min={5}
+                                max={86400}
+                            />
                         </Field>
                         <Field label="MeterValue interval (s)">
-                            <Input type="number" value={form.meterValueIntervalSeconds} onChange={set('meterValueIntervalSeconds')} min={1} max={3600} />
+                            <Input
+                                type="number"
+                                value={form.meterValueIntervalSeconds}
+                                onChange={set('meterValueIntervalSeconds')}
+                                min={1}
+                                max={3600}
+                            />
                         </Field>
                         <Field label="Total duration (s)">
-                            <Input type="number" value={form.totalDurationSeconds} onChange={set('totalDurationSeconds')} min={10} max={86400} />
+                            <Input
+                                type="number"
+                                value={form.totalDurationSeconds}
+                                onChange={set('totalDurationSeconds')}
+                                min={10}
+                                max={86400}
+                            />
                         </Field>
                         <Field label="OCPP URL (override)">
                             <Input
@@ -321,7 +377,9 @@ function RunTab() {
                             <input
                                 type="checkbox"
                                 checked={form.autoCleanup}
-                                onChange={(e) => setForm((f) => ({ ...f, autoCleanup: e.target.checked }))}
+                                onChange={(e) =>
+                                    setForm((f) => ({ ...f, autoCleanup: e.target.checked }))
+                                }
                                 className="h-4 w-4"
                             />
                             Auto-cleanup on completion
@@ -333,7 +391,12 @@ function RunTab() {
                                 {start.isPending ? 'Starting…' : running ? 'Running…' : 'Start run'}
                             </Button>
                             {running && (
-                                <Button type="button" variant="outline" onClick={() => stop.mutate()} disabled={stop.isPending}>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => stop.mutate()}
+                                    disabled={stop.isPending}
+                                >
                                     <StopCircle className="h-4 w-4" /> Stop
                                 </Button>
                             )}
@@ -352,7 +415,11 @@ function RunTab() {
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                             <Stat label="Elapsed" value={`${latest.t}s`} />
                             <Stat label="Devices online" value={latest.devicesOnline} />
-                            <Stat label="Active sessions" value={latest.sessionsActive} accent="text-brand-orange" />
+                            <Stat
+                                label="Active sessions"
+                                value={latest.sessionsActive}
+                                accent="text-brand-orange"
+                            />
                             <Stat label="Sessions started" value={latest.sessionsStarted} />
                             <Stat
                                 label="Errors"
@@ -399,7 +466,10 @@ function HistoryTab() {
                         ))}
                         {!isLoading && (data?.runs.length ?? 0) === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                                <td
+                                    colSpan={7}
+                                    className="px-4 py-8 text-center text-muted-foreground"
+                                >
                                     No runs yet. Start one from the Run scenario tab.
                                 </td>
                             </tr>
@@ -423,15 +493,19 @@ function RunRow({ run }: { run: BenchmarkRun }) {
                         {run.scenario.name}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        #{run.id} · {run.scenario.deviceCount} {run.scenario.deviceMix} ·
-                        {' '}{run.scenario.totalDurationSeconds}s
+                        #{run.id} · {run.scenario.deviceCount} {run.scenario.deviceMix} ·{' '}
+                        {run.scenario.totalDurationSeconds}s
                     </div>
                 </Link>
             </td>
             <td className="px-4 py-2 text-xs">{new Date(run.startedAt).toLocaleString()}</td>
-            <td className="px-4 py-2 text-right tabular-nums">{run.summary?.devicesSpawned ?? '—'}</td>
             <td className="px-4 py-2 text-right tabular-nums">
-                {run.summary ? `${run.summary.sessionsStarted} / ${run.summary.sessionsStopped}` : '—'}
+                {run.summary?.devicesSpawned ?? '—'}
+            </td>
+            <td className="px-4 py-2 text-right tabular-nums">
+                {run.summary
+                    ? `${run.summary.sessionsStarted} / ${run.summary.sessionsStopped}`
+                    : '—'}
             </td>
             <td
                 className={cn(
@@ -472,13 +546,21 @@ function StatusBadge({ status }: { status: BenchmarkRun['status'] }) {
     }
     return (
         <Badge variant="destructive" className="gap-1.5">
-            {status === 'failed' ? <XCircle className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {status === 'failed' ? (
+                <XCircle className="h-3 w-3" />
+            ) : (
+                <AlertTriangle className="h-3 w-3" />
+            )}
             {status === 'failed' ? 'Failed' : status}
         </Badge>
     );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+function Stat({
+    label,
+    value,
+    accent,
+}: { label: string; value: string | number; accent?: string }) {
     return (
         <div className="rounded-md border bg-secondary/30 p-3">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>

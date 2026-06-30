@@ -12,7 +12,10 @@ import {
 
 describe('OCPP frame codec', () => {
     it('round-trips a CALL', () => {
-        const wire = encodeCall('abc', 'BootNotification', { chargePointVendor: 'Eveys', chargePointModel: 'X' });
+        const wire = encodeCall('abc', 'BootNotification', {
+            chargePointVendor: 'Eveys',
+            chargePointModel: 'X',
+        });
         const decoded = decodeFrame(wire);
         expect(decoded[0]).toBe(MessageType.CALL);
         expect(decoded[1]).toBe('abc');

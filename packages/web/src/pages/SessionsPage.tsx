@@ -57,7 +57,9 @@ export function SessionsPage() {
         <div className="space-y-4">
             <div>
                 <h1 className="text-2xl font-semibold">Sessions</h1>
-                <p className="text-sm text-muted-foreground">All charging sessions, newest first.</p>
+                <p className="text-sm text-muted-foreground">
+                    All charging sessions, newest first.
+                </p>
             </div>
 
             <Card>
@@ -70,7 +72,9 @@ export function SessionsPage() {
                                 resetToFirstPage();
                             }}
                         >
-                            <SelectTrigger className="h-8 w-32 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-8 w-32 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All</SelectItem>
                                 <SelectItem value="active">Active</SelectItem>
@@ -88,7 +92,9 @@ export function SessionsPage() {
                                 resetToFirstPage();
                             }}
                         >
-                            <SelectTrigger className="h-8 w-44 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-8 w-44 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All devices</SelectItem>
                                 {(devicesQuery.data ?? []).map((d) => (
@@ -120,7 +126,9 @@ export function SessionsPage() {
                                 resetToFirstPage();
                             }}
                         >
-                            <SelectTrigger className="h-8 w-20 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-8 w-20 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
                             <SelectContent>
                                 {PAGE_SIZES.map((n) => (
                                     <SelectItem key={n} value={String(n)}>
@@ -164,7 +172,11 @@ export function SessionsPage() {
                                     <td className="px-4 py-2">
                                         <Badge
                                             variant={
-                                                s.status === 'active' ? 'online' : s.status === 'completed' ? 'secondary' : 'destructive'
+                                                s.status === 'active'
+                                                    ? 'online'
+                                                    : s.status === 'completed'
+                                                      ? 'secondary'
+                                                      : 'destructive'
                                             }
                                         >
                                             {s.status}
@@ -173,17 +185,32 @@ export function SessionsPage() {
                                     <td className="px-4 py-2 font-mono text-xs">{s.deviceId}</td>
                                     <td className="px-4 py-2">{s.connectorId}</td>
                                     <td className="px-4 py-2 font-mono text-xs">{s.idTag}</td>
-                                    <td className="px-4 py-2 text-xs">{new Date(s.startedAt).toLocaleString()}</td>
-                                    <td className="px-4 py-2 text-xs">{s.endedAt ? new Date(s.endedAt).toLocaleString() : '—'}</td>
-                                    <td className="px-4 py-2 text-right tabular-nums">{(s.energyWh / 1000).toFixed(3)} kWh</td>
-                                    <td className="px-4 py-2 text-right tabular-nums">{s.peakPowerKw.toFixed(1)} kW</td>
-                                    <td className="px-4 py-2 text-xs text-muted-foreground">{s.endReason ?? '—'}</td>
+                                    <td className="px-4 py-2 text-xs">
+                                        {new Date(s.startedAt).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-2 text-xs">
+                                        {s.endedAt ? new Date(s.endedAt).toLocaleString() : '—'}
+                                    </td>
+                                    <td className="px-4 py-2 text-right tabular-nums">
+                                        {(s.energyWh / 1000).toFixed(3)} kWh
+                                    </td>
+                                    <td className="px-4 py-2 text-right tabular-nums">
+                                        {s.peakPowerKw.toFixed(1)} kW
+                                    </td>
+                                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                                        {s.endReason ?? '—'}
+                                    </td>
                                 </tr>
                             ))}
                             {sessions.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
-                                        {isLoading ? 'Loading…' : 'No sessions match the current filters.'}
+                                    <td
+                                        colSpan={9}
+                                        className="px-4 py-8 text-center text-muted-foreground"
+                                    >
+                                        {isLoading
+                                            ? 'Loading…'
+                                            : 'No sessions match the current filters.'}
                                     </td>
                                 </tr>
                             )}
@@ -222,7 +249,9 @@ export function SessionsPage() {
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="space-y-1">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</Label>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {label}
+            </Label>
             <div>{children}</div>
         </div>
     );

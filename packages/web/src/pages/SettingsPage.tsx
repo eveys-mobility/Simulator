@@ -64,7 +64,8 @@ export function SettingsPage() {
             <div>
                 <h1 className="text-2xl font-semibold">Settings</h1>
                 <p className="text-sm text-muted-foreground">
-                    Simulator-wide preferences. Per-device options live on each device's edit dialog.
+                    Simulator-wide preferences. Per-device options live on each device's edit
+                    dialog.
                 </p>
             </div>
 
@@ -74,8 +75,9 @@ export function SettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                        New devices connect to this WebSocket URL by default. Existing devices keep their own
-                        URL until you edit them — this only affects the next device you create.
+                        New devices connect to this WebSocket URL by default. Existing devices keep
+                        their own URL until you edit them — this only affects the next device you
+                        create.
                     </p>
 
                     <form
@@ -109,12 +111,8 @@ export function SettingsPage() {
                             </Button>
                         </div>
 
-                        {saved && (
-                            <p className="text-sm text-brand-green">Saved.</p>
-                        )}
-                        {error && (
-                            <p className="text-sm text-destructive">{error}</p>
-                        )}
+                        {saved && <p className="text-sm text-brand-green">Saved.</p>}
+                        {error && <p className="text-sm text-destructive">{error}</p>}
                     </form>
                 </CardContent>
             </Card>
@@ -183,9 +181,12 @@ function DeletedDevicesCard() {
             </CardHeader>
             <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                    Soft-deleted devices stay here so their session history is preserved. Restore brings the
-                    device back to the live fleet; purge permanently removes it and{' '}
-                    <span className="font-medium text-destructive">drops every session it ever ran</span>.
+                    Soft-deleted devices stay here so their session history is preserved. Restore
+                    brings the device back to the live fleet; purge permanently removes it and{' '}
+                    <span className="font-medium text-destructive">
+                        drops every session it ever ran
+                    </span>
+                    .
                 </p>
                 {isLoading ? (
                     <p className="text-sm text-muted-foreground">Loading…</p>
@@ -242,10 +243,14 @@ function DeletedDevicesCard() {
                     purgeTarget ? (
                         <>
                             Permanently remove{' '}
-                            <span className="font-medium text-foreground">{purgeTarget.displayName}</span>{' '}
-                            <span className="font-mono text-xs text-muted-foreground">({purgeTarget.id})</span>{' '}
-                            and every session it ever ran. This cannot be undone — type the word below if you
-                            really mean it.
+                            <span className="font-medium text-foreground">
+                                {purgeTarget.displayName}
+                            </span>{' '}
+                            <span className="font-mono text-xs text-muted-foreground">
+                                ({purgeTarget.id})
+                            </span>{' '}
+                            and every session it ever ran. This cannot be undone — type the word
+                            below if you really mean it.
                         </>
                     ) : null
                 }
@@ -291,16 +296,24 @@ function ResetDatabaseCard() {
             </CardHeader>
             <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                    Reset the database. Every device, session, OCPP-config row and app setting is dropped.
-                    Running OCPP connections are torn down. The OCPP gateway URL falls back to the
-                    <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">OCPP_URL</code>
-                    env var, or <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">ws://localhost:19000</code>
+                    Reset the database. Every device, session, OCPP-config row and app setting is
+                    dropped. Running OCPP connections are torn down. The OCPP gateway URL falls back
+                    to the
+                    <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">
+                        OCPP_URL
+                    </code>
+                    env var, or{' '}
+                    <code className="mx-1 px-1 py-0.5 rounded bg-secondary/40 text-foreground">
+                        ws://localhost:19000
+                    </code>
                     if unset.
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <div className="flex-1 space-y-1">
                         <Label htmlFor="reset-confirm" className="text-xs text-muted-foreground">
-                            Type <span className="font-mono font-bold text-destructive">DELETE</span> to confirm
+                            Type{' '}
+                            <span className="font-mono font-bold text-destructive">DELETE</span> to
+                            confirm
                         </Label>
                         <Input
                             id="reset-confirm"

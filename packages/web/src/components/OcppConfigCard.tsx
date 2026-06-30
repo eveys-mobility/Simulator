@@ -186,7 +186,13 @@ export function OcppConfigCard({ deviceId }: Props) {
                 else if (r.status === 'RebootRequired') rebootRequired += 1;
                 else if (r.status === 'NotSupported') notSupported += 1;
             }
-            setLastBulkSummary({ accepted, rejected, rebootRequired, notSupported, at: Date.now() });
+            setLastBulkSummary({
+                accepted,
+                rejected,
+                rebootRequired,
+                notSupported,
+                at: Date.now(),
+            });
         },
     });
 
@@ -238,7 +244,9 @@ export function OcppConfigCard({ deviceId }: Props) {
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => qc.invalidateQueries({ queryKey: ['device-config', deviceId] })}
+                        onClick={() =>
+                            qc.invalidateQueries({ queryKey: ['device-config', deviceId] })
+                        }
                         title="Refresh"
                         disabled={saveAll.isPending}
                     >
@@ -250,7 +258,9 @@ export function OcppConfigCard({ deviceId }: Props) {
                         disabled={dirtyCount === 0 || saveAll.isPending || saveOne.isPending}
                     >
                         <Save className="h-3.5 w-3.5" />
-                        {saveAll.isPending ? 'Saving…' : `Save all${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+                        {saveAll.isPending
+                            ? 'Saving…'
+                            : `Save all${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
                     </Button>
                 </div>
             </CardHeader>
@@ -277,7 +287,9 @@ export function OcppConfigCard({ deviceId }: Props) {
                                     status={status}
                                     onChange={(v) => setDraft(k.key, v, k.value)}
                                     onReset={() => resetDraft(k.key)}
-                                    onSave={() => saveOne.mutate({ key: k.key, value: draft ?? k.value })}
+                                    onSave={() =>
+                                        saveOne.mutate({ key: k.key, value: draft ?? k.value })
+                                    }
                                     saving={saveOne.isPending || saveAll.isPending}
                                 />
                             );
@@ -306,7 +318,9 @@ function ConfigRow({ entry, draft, dirty, status, onChange, onReset, onSave, sav
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-sm font-medium truncate">{entry.key}</span>
-                    <Badge variant="outline" className="text-[10px] uppercase">{entry.type}</Badge>
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                        {entry.type}
+                    </Badge>
                     {entry.readonly && (
                         <Badge
                             variant="outline"
@@ -440,24 +454,34 @@ function BulkSummaryBadge({
 function StatusBadge({ status }: { status: WriteStatus }) {
     if (status === 'Accepted') {
         return (
-            <Badge variant="outline" className="text-[10px] gap-1 bg-brand-green/15 text-brand-green border-brand-green/30">
+            <Badge
+                variant="outline"
+                className="text-[10px] gap-1 bg-brand-green/15 text-brand-green border-brand-green/30"
+            >
                 <Check className="h-2.5 w-2.5" /> Accepted
             </Badge>
         );
     }
     if (status === 'RebootRequired') {
         return (
-            <Badge variant="outline" className="text-[10px] gap-1 bg-amber-500/15 text-amber-600 border-amber-500/30">
+            <Badge
+                variant="outline"
+                className="text-[10px] gap-1 bg-amber-500/15 text-amber-600 border-amber-500/30"
+            >
                 <AlertTriangle className="h-2.5 w-2.5" /> Reboot required
             </Badge>
         );
     }
     if (status === 'Rejected') {
         return (
-            <Badge variant="destructive" className="text-[10px]">Rejected</Badge>
+            <Badge variant="destructive" className="text-[10px]">
+                Rejected
+            </Badge>
         );
     }
     return (
-        <Badge variant="outline" className="text-[10px] bg-secondary/40">NotSupported</Badge>
+        <Badge variant="outline" className="text-[10px] bg-secondary/40">
+            NotSupported
+        </Badge>
     );
 }

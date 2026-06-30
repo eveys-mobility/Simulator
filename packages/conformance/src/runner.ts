@@ -16,7 +16,13 @@ export interface ConformanceCase {
     /** Human title — e.g. "BootNotification → CSMS Accepts → device emits Heartbeat". */
     title: string;
     /** OCPP profile this case belongs to (Core, FirmwareManagement, ...). */
-    profile: 'Core' | 'FirmwareManagement' | 'LocalAuthListManagement' | 'Reservation' | 'SmartCharging' | 'RemoteTrigger';
+    profile:
+        | 'Core'
+        | 'FirmwareManagement'
+        | 'LocalAuthListManagement'
+        | 'Reservation'
+        | 'SmartCharging'
+        | 'RemoteTrigger';
     /** How long to wait before the runner gives up. */
     timeoutMs?: number;
     /** Set up overrides for the MockCsms. Each case spins up its own
@@ -85,7 +91,10 @@ async function withTimeout<T>(p: Promise<T>, ms: number, id: string): Promise<T>
     return await Promise.race([
         p,
         new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`conformance case ${id} timed out after ${ms}ms`)), ms),
+            setTimeout(
+                () => reject(new Error(`conformance case ${id} timed out after ${ms}ms`)),
+                ms,
+            ),
         ),
     ]);
 }

@@ -23,7 +23,10 @@ export interface RecordedFrame {
  * Defaults are installed for every standard 1.6J device-initiated
  * action. Tests override per-action via MockCsms.setHandler.
  */
-export type DeviceCallHandler = (payload: unknown, ctx: { deviceId: string; action: string }) => unknown | Promise<unknown>;
+export type DeviceCallHandler = (
+    payload: unknown,
+    ctx: { deviceId: string; action: string },
+) => unknown | Promise<unknown>;
 
 export interface MockCsmsOptions {
     /** TCP port. 0 picks a free one — `csms.url` reflects the choice. */

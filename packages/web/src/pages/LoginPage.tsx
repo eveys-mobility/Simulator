@@ -43,7 +43,8 @@ export function LoginPage({ onSubmit, error }: LoginPageProps) {
                         Sign in
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                        This simulator is protected with an access token. Paste it below to continue.
+                        This simulator is protected with an access token. Paste it below to
+                        continue.
                     </p>
                 </CardHeader>
                 <CardContent>
@@ -65,12 +66,19 @@ export function LoginPage({ onSubmit, error }: LoginPageProps) {
                                 {error}
                             </div>
                         )}
-                        <Button type="submit" disabled={!token.trim() || submitting} className="w-full">
+                        <Button
+                            type="submit"
+                            disabled={!token.trim() || submitting}
+                            className="w-full"
+                        >
                             {submitting ? 'Verifying…' : 'Sign in'}
                         </Button>
                         <p className="text-xs text-muted-foreground">
                             The token is whatever value the operator started the server with via{' '}
-                            <code className="px-1 py-0.5 rounded bg-secondary/40 text-foreground">AUTH_TOKEN</code>.
+                            <code className="px-1 py-0.5 rounded bg-secondary/40 text-foreground">
+                                AUTH_TOKEN
+                            </code>
+                            .
                         </p>
                     </form>
                 </CardContent>

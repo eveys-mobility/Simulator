@@ -63,9 +63,9 @@ describe('resolveActiveLimit — stack within a purpose', () => {
 
 describe('resolveActiveLimit — purpose precedence (minimum across)', () => {
     const profiles: ChargingProfile[] = [
-        cpMaxProfile(1, 0, 22000),     // 22 kW cap on the device
+        cpMaxProfile(1, 0, 22000), // 22 kW cap on the device
         txDefaultProfile(2, 0, 11000), // 11 kW default for any session
-        txProfile(3, 0, 5000, 99),     // 5 kW for session 99 specifically
+        txProfile(3, 0, 5000, 99), // 5 kW for session 99 specifically
     ];
 
     it('with active session, takes the minimum across purposes', () => {
@@ -175,7 +175,9 @@ describe('resolveActiveLimit — period walking', () => {
 describe('resolveActiveLimit — Recurring schedule edge cases', () => {
     /** Build a Recurring Daily schedule that starts at T0 with the
      *  given periods (interpreted as offsets from the cycle start). */
-    const dailyRecurring = (periods: { startPeriod: number; limit: number }[]): ChargingProfile => ({
+    const dailyRecurring = (
+        periods: { startPeriod: number; limit: number }[],
+    ): ChargingProfile => ({
         chargingProfileId: 1,
         stackLevel: 0,
         chargingProfilePurpose: 'ChargePointMaxProfile',
@@ -239,11 +241,17 @@ describe('resolveActiveLimit — Recurring schedule edge cases', () => {
             },
         };
         // Day 1 → still on the first period (would be a wrap on Daily).
-        expect(resolveActiveLimit({ profiles: [p], now: T0 + 1 * 86400 * 1000 }).limitW).toBe(11000);
+        expect(resolveActiveLimit({ profiles: [p], now: T0 + 1 * 86400 * 1000 }).limitW).toBe(
+            11000,
+        );
         // Day 6 → the second period.
-        expect(resolveActiveLimit({ profiles: [p], now: T0 + 6 * 86400 * 1000 }).limitW).toBe(22000);
+        expect(resolveActiveLimit({ profiles: [p], now: T0 + 6 * 86400 * 1000 }).limitW).toBe(
+            22000,
+        );
         // Day 8 → wrapped, back to day-1-of-cycle = first period.
-        expect(resolveActiveLimit({ profiles: [p], now: T0 + 8 * 86400 * 1000 }).limitW).toBe(11000);
+        expect(resolveActiveLimit({ profiles: [p], now: T0 + 8 * 86400 * 1000 }).limitW).toBe(
+            11000,
+        );
     });
 
     it('returns null before startSchedule (future-dated profile)', () => {
@@ -289,7 +297,9 @@ describe('resolveActiveLimit — Recurring schedule edge cases', () => {
         // Outside the window on day 0 (2h in).
         expect(resolveActiveLimit({ profiles: [p], now: T0 + 2 * 3600 * 1000 }).limitW).toBeNull();
         // Inside the window on day 3.
-        expect(resolveActiveLimit({ profiles: [p], now: T0 + (3 * 24 + 0.5) * 3600 * 1000 }).limitW).toBe(5000);
+        expect(
+            resolveActiveLimit({ profiles: [p], now: T0 + (3 * 24 + 0.5) * 3600 * 1000 }).limitW,
+        ).toBe(5000);
     });
 });
 

@@ -1,10 +1,4 @@
-import {
-    Counter,
-    Gauge,
-    Histogram,
-    Registry,
-    collectDefaultMetrics,
-} from 'prom-client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 /**
  * Prometheus registry + the metric set listed in the Phase 7a roadmap.

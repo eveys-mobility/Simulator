@@ -69,7 +69,10 @@ export class BenchmarkEngine extends EventEmitter {
         //    spawns one per tick rather than N independent setTimeouts —
         //    keeps the gateway-facing connection rate predictable.
         const rampMs = this.scenario.rampUpSeconds * 1000;
-        const intervalMs = this.scenario.deviceCount > 0 ? Math.max(1, Math.floor(rampMs / this.scenario.deviceCount)) : 1;
+        const intervalMs =
+            this.scenario.deviceCount > 0
+                ? Math.max(1, Math.floor(rampMs / this.scenario.deviceCount))
+                : 1;
         let i = 0;
         const ramp = () => {
             if (this.stopRequested || i >= this.scenario.deviceCount) {
@@ -181,17 +184,22 @@ export class BenchmarkEngine extends EventEmitter {
         await this.manager.spawn(device);
         // Push the meter cadence the scenario asked for.
         const sim = this.manager.get(id);
-        sim?.setOcppConfig('MeterValueSampleInterval', String(this.scenario.meterValueIntervalSeconds));
+        sim?.setOcppConfig(
+            'MeterValueSampleInterval',
+            String(this.scenario.meterValueIntervalSeconds),
+        );
         // Schedule the first session at a randomized offset within the
         // average-spacing interval so the fleet doesn't synchronize.
-        const avgSpacingMs = this.scenario.sessionsPerHourPerDevice > 0
-            ? Math.round((3600 / this.scenario.sessionsPerHourPerDevice) * 1000)
-            : Number.POSITIVE_INFINITY;
+        const avgSpacingMs =
+            this.scenario.sessionsPerHourPerDevice > 0
+                ? Math.round((3600 / this.scenario.sessionsPerHourPerDevice) * 1000)
+                : Number.POSITIVE_INFINITY;
         this.state.set(id, {
             device,
-            nextSessionAt: avgSpacingMs === Number.POSITIVE_INFINITY
-                ? Number.POSITIVE_INFINITY
-                : Date.now() + Math.floor(Math.random() * avgSpacingMs),
+            nextSessionAt:
+                avgSpacingMs === Number.POSITIVE_INFINITY
+                    ? Number.POSITIVE_INFINITY
+                    : Date.now() + Math.floor(Math.random() * avgSpacingMs),
             activeConnector: null,
             sessionEndAt: 0,
         });
@@ -214,14 +222,18 @@ export class BenchmarkEngine extends EventEmitter {
                 st.activeConnector = null;
                 st.sessionEndAt = 0;
                 // Schedule the next start at avg-spacing from now.
-                const avgSpacingMs = Math.round((3600 / Math.max(0.001, this.scenario.sessionsPerHourPerDevice)) * 1000);
+                const avgSpacingMs = Math.round(
+                    (3600 / Math.max(0.001, this.scenario.sessionsPerHourPerDevice)) * 1000,
+                );
                 st.nextSessionAt = now + avgSpacingMs;
                 continue;
             }
 
             // Start a session if it's due and a connector is free.
             if (st.activeConnector === null && now >= st.nextSessionAt) {
-                const free = snap.connectors.find((c) => c.status === 'Available' && c.transactionId === null);
+                const free = snap.connectors.find(
+                    (c) => c.status === 'Available' && c.transactionId === null,
+                );
                 if (!free) {
                     // Defer; try again next tick.
                     st.nextSessionAt = now + 1000;

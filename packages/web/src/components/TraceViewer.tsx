@@ -63,7 +63,8 @@ export function TraceViewer({ deviceId }: Props) {
         if (!filter.trim()) return traces;
         const q = filter.toLowerCase();
         return traces.filter(
-            (t) => t.action.toLowerCase().includes(q) || t.direction.includes(q) || t.id.includes(q),
+            (t) =>
+                t.action.toLowerCase().includes(q) || t.direction.includes(q) || t.id.includes(q),
         );
     }, [traces, filter]);
 
@@ -122,7 +123,11 @@ export function TraceViewer({ deviceId }: Props) {
                         aria-pressed={follow}
                         title={follow ? 'Auto-scroll: on' : 'Auto-scroll: paused'}
                     >
-                        {follow ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        {follow ? (
+                            <Pause className="h-3.5 w-3.5" />
+                        ) : (
+                            <Play className="h-3.5 w-3.5" />
+                        )}
                         {follow ? 'Pause' : 'Follow'}
                     </Button>
                     <Button
@@ -151,7 +156,12 @@ export function TraceViewer({ deviceId }: Props) {
                     ) : (
                         <ul className="divide-y divide-border/50">
                             {filtered.map((t) => (
-                                <Row key={t.seq} entry={t} open={openIds.has(t.seq)} onToggle={() => toggle(t.seq)} />
+                                <Row
+                                    key={t.seq}
+                                    entry={t}
+                                    open={openIds.has(t.seq)}
+                                    onToggle={() => toggle(t.seq)}
+                                />
                             ))}
                         </ul>
                     )}
@@ -163,7 +173,11 @@ export function TraceViewer({ deviceId }: Props) {
 
 const EMPTY: TraceEntry[] = [];
 
-function Row({ entry, open, onToggle }: { entry: TraceEntry; open: boolean; onToggle: () => void }) {
+function Row({
+    entry,
+    open,
+    onToggle,
+}: { entry: TraceEntry; open: boolean; onToggle: () => void }) {
     const time = new Date(entry.at);
     const hh = String(time.getHours()).padStart(2, '0');
     const mm = String(time.getMinutes()).padStart(2, '0');
@@ -198,8 +212,14 @@ function Row({ entry, open, onToggle }: { entry: TraceEntry; open: boolean; onTo
                 </Badge>
                 <span className="font-medium text-foreground truncate">{entry.action}</span>
                 <span className="ml-auto flex items-center gap-1 text-muted-foreground">
-                    <span className="hidden sm:inline truncate max-w-[8rem]">{entry.id.slice(0, 8)}</span>
-                    {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    <span className="hidden sm:inline truncate max-w-[8rem]">
+                        {entry.id.slice(0, 8)}
+                    </span>
+                    {open ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                    ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    )}
                 </span>
             </button>
             {open && (

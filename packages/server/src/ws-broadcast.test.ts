@@ -87,7 +87,8 @@ describe('WS broadcast coalescing', () => {
             }
         });
         const meterFrames = messages.filter(
-            (m) => m.type === 'frame' && (m.payload as { action?: string }).action === 'MeterValues',
+            (m) =>
+                m.type === 'frame' && (m.payload as { action?: string }).action === 'MeterValues',
         );
         expect(meterFrames.length).toBeLessThanOrEqual(2);
         const summary = messages.find((m) => m.type === 'frames-coalesced');
@@ -158,9 +159,24 @@ describe('WS broadcast coalescing', () => {
             store.close();
         };
         const messages = await collect(url, 200, () => {
-            manager.emit('frame', { deviceId: 'cp_a', action: 'StartTransaction', id: '1', direction: 'out' });
-            manager.emit('frame', { deviceId: 'cp_a', action: 'StatusNotification', id: '2', direction: 'out' });
-            manager.emit('frame', { deviceId: 'cp_a', action: 'StopTransaction', id: '3', direction: 'out' });
+            manager.emit('frame', {
+                deviceId: 'cp_a',
+                action: 'StartTransaction',
+                id: '1',
+                direction: 'out',
+            });
+            manager.emit('frame', {
+                deviceId: 'cp_a',
+                action: 'StatusNotification',
+                id: '2',
+                direction: 'out',
+            });
+            manager.emit('frame', {
+                deviceId: 'cp_a',
+                action: 'StopTransaction',
+                id: '3',
+                direction: 'out',
+            });
         });
         const actions = messages
             .filter((m) => m.type === 'frame')

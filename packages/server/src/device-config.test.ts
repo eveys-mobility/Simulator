@@ -59,7 +59,9 @@ describe('per-device OCPP config endpoints', () => {
             body: JSON.stringify({ type: 'AC' }),
         }).then((r) => r.json())) as { id: string };
 
-        const cfg = (await fetch(`${base}/api/devices/${created.id}/config`).then((r) => r.json())) as {
+        const cfg = (await fetch(`${base}/api/devices/${created.id}/config`).then((r) =>
+            r.json(),
+        )) as {
             keys: ConfigKey[];
         };
         expect(cfg.keys.length).toBeGreaterThan(20);
@@ -97,7 +99,9 @@ describe('per-device OCPP config endpoints', () => {
         expect(r.value).toBe('120');
 
         // Re-read to confirm persistence.
-        const cfg = (await fetch(`${base}/api/devices/${created.id}/config`).then((r) => r.json())) as {
+        const cfg = (await fetch(`${base}/api/devices/${created.id}/config`).then((r) =>
+            r.json(),
+        )) as {
             keys: ConfigKey[];
         };
         expect(cfg.keys.find((k) => k.key === 'HeartbeatInterval')?.value).toBe('120');
@@ -205,11 +209,16 @@ describe('per-device OCPP config endpoints', () => {
                     HeartbeatInterval: '90',
                     AuthorizeRemoteTxRequests: 'true',
                     NumberOfConnectors: '99', // read-only → Rejected
-                    BogusKey: 'whatever',     // unknown → NotSupported
+                    BogusKey: 'whatever', // unknown → NotSupported
                     MeterValueSampleInterval: 'not-a-number', // bad type → Rejected
                 },
             }),
-        }).then((r) => r.json() as Promise<{ results: Array<{ key: string; status: string; value: string }> }>);
+        }).then(
+            (r) =>
+                r.json() as Promise<{
+                    results: Array<{ key: string; status: string; value: string }>;
+                }>,
+        );
 
         // Map results by key for easier assertion.
         const byKey = Object.fromEntries(r.results.map((x) => [x.key, x]));

@@ -110,7 +110,10 @@ export function useAuthGate(): AuthState & {
             headers: { authorization: `Bearer ${token}` },
         });
         if (!verify.ok) {
-            setState((s) => ({ ...s, error: 'Invalid token — request was rejected by the server.' }));
+            setState((s) => ({
+                ...s,
+                error: 'Invalid token — request was rejected by the server.',
+            }));
             return false;
         }
         setToken(token);

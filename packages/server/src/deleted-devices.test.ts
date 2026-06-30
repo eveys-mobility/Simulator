@@ -67,7 +67,9 @@ describe('deleted-devices admin endpoints', () => {
         expect(typeof listed[0]?.deletedAt).toBe('string');
 
         // Live list still shows the second (DC) one.
-        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{ id: string }>;
+        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{
+            id: string;
+        }>;
         expect(live.find((d) => d.id === a.id)).toBeUndefined();
     });
 
@@ -91,9 +93,13 @@ describe('deleted-devices admin endpoints', () => {
         });
         expect(restored.status).toBe(200);
 
-        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{ id: string }>;
+        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{
+            id: string;
+        }>;
         expect(live.find((d) => d.id === created.id)).toBeDefined();
-        const deleted = (await fetch(`${base}/api/devices/deleted`).then((r) => r.json())) as Array<{
+        const deleted = (await fetch(`${base}/api/devices/deleted`).then((r) =>
+            r.json(),
+        )) as Array<{
             id: string;
         }>;
         expect(deleted).toHaveLength(0);
@@ -140,7 +146,9 @@ describe('deleted-devices admin endpoints', () => {
         await fetch(`${base}/api/devices/${created.id}`, { method: 'DELETE' });
 
         // Missing / wrong query → 400, no purge.
-        const noConfirm = await fetch(`${base}/api/devices/${created.id}/purge`, { method: 'DELETE' });
+        const noConfirm = await fetch(`${base}/api/devices/${created.id}/purge`, {
+            method: 'DELETE',
+        });
         expect(noConfirm.status).toBe(400);
         const wrongConfirm = await fetch(`${base}/api/devices/${created.id}/purge?confirm=YES`, {
             method: 'DELETE',
@@ -154,7 +162,9 @@ describe('deleted-devices admin endpoints', () => {
 
         // Audit trail wiped: that's the contract of purge.
         expect(store.listSessions({ deviceId: created.id })).toEqual([]);
-        const deleted = (await fetch(`${base}/api/devices/deleted`).then((r) => r.json())) as unknown[];
+        const deleted = (await fetch(`${base}/api/devices/deleted`).then((r) =>
+            r.json(),
+        )) as unknown[];
         expect(deleted).toEqual([]);
     });
 
@@ -177,7 +187,9 @@ describe('deleted-devices admin endpoints', () => {
         });
         expect(r.status).toBe(404);
         // Device still alive.
-        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{ id: string }>;
+        const live = (await fetch(`${base}/api/devices`).then((r) => r.json())) as Array<{
+            id: string;
+        }>;
         expect(live.find((d) => d.id === created.id)).toBeDefined();
     });
 });

@@ -115,9 +115,11 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     }
     {
         try {
-            await waitFor(() => wsFrames.some(
-                (f) => f.deviceId === cpId && f.action === 'BootNotification',
-            ), 8000, 'BootNotification on the wire');
+            await waitFor(
+                () => wsFrames.some((f) => f.deviceId === cpId && f.action === 'BootNotification'),
+                8000,
+                'BootNotification on the wire',
+            );
             // Confirm the gateway accepted it (sim's BootNotification CALL has
             // a CALLRESULT from the gateway).
             const dev = await sim('GET', `/devices/${cpId}`);
@@ -227,12 +229,24 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     {
         try {
             await waitFor(
-                () => wsFrames.some((f) => f.deviceId === cpId && f.action === 'StartTransaction' && f.direction === 'out'),
+                () =>
+                    wsFrames.some(
+                        (f) =>
+                            f.deviceId === cpId &&
+                            f.action === 'StartTransaction' &&
+                            f.direction === 'out',
+                    ),
                 6000,
                 'StartTransaction CALL',
             );
             await waitFor(
-                () => wsFrames.some((f) => f.deviceId === cpId && f.action === 'StartTransaction' && f.direction === 'in'),
+                () =>
+                    wsFrames.some(
+                        (f) =>
+                            f.deviceId === cpId &&
+                            f.action === 'StartTransaction' &&
+                            f.direction === 'in',
+                    ),
                 4000,
                 'StartTransaction CALLRESULT',
             );
@@ -280,19 +294,24 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     {
         try {
             await waitFor(
-                () => wsFrames.some(
-                    (f) =>
-                        f.deviceId === cpId &&
-                        f.action === 'StopTransaction' &&
-                        f.direction === 'out',
-                ),
+                () =>
+                    wsFrames.some(
+                        (f) =>
+                            f.deviceId === cpId &&
+                            f.action === 'StopTransaction' &&
+                            f.direction === 'out',
+                    ),
                 4000,
                 'StopTransaction CALL',
             );
-            await waitFor(async () => {
-                const dev = await sim('GET', `/devices/${cpId}`);
-                return dev.body?.connectors?.[0]?.status === 'Available';
-            }, 4000, 'connector returns Available');
+            await waitFor(
+                async () => {
+                    const dev = await sim('GET', `/devices/${cpId}`);
+                    return dev.body?.connectors?.[0]?.status === 'Available';
+                },
+                4000,
+                'connector returns Available',
+            );
             record('StopTransaction round-trip + Available', null, null, 'pass', '');
         } catch (e) {
             record('StopTransaction round-trip + Available', null, null, 'fail', e.message);
@@ -316,10 +335,14 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     }
     {
         try {
-            await waitFor(async () => {
-                const dev = await sim('GET', `/devices/${cpId}`);
-                return dev.body?.connectors?.[0]?.status === 'Unavailable';
-            }, 4000, 'status=Unavailable');
+            await waitFor(
+                async () => {
+                    const dev = await sim('GET', `/devices/${cpId}`);
+                    return dev.body?.connectors?.[0]?.status === 'Unavailable';
+                },
+                4000,
+                'status=Unavailable',
+            );
             record(
                 'Inoperative reflected on the sim',
                 null,
@@ -368,10 +391,14 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     }
     {
         try {
-            await waitFor(async () => {
-                const dev = await sim('GET', `/devices/${cpId}`);
-                return dev.body?.connectors?.[0]?.status === 'Reserved';
-            }, 4000, 'status=Reserved');
+            await waitFor(
+                async () => {
+                    const dev = await sim('GET', `/devices/${cpId}`);
+                    return dev.body?.connectors?.[0]?.status === 'Reserved';
+                },
+                4000,
+                'status=Reserved',
+            );
             record('Reserved status flipped on sim', null, null, 'pass', '');
         } catch (e) {
             record('Reserved status flipped on sim', null, null, 'fail', e.message);
@@ -412,7 +439,9 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
                     start_schedule: new Date().toISOString(),
                     charging_rate_unit: 'W',
                     min_charging_rate: null,
-                    charging_schedule_period: [{ start_period: 0, limit: 8000, number_phases: null }],
+                    charging_schedule_period: [
+                        { start_period: 0, limit: 8000, number_phases: null },
+                    ],
                 },
             },
         });
@@ -552,7 +581,7 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             vendor_id: 'Eveys',
         });
         record(
-            "DataTransfer (own vendorId) → Accepted",
+            'DataTransfer (own vendorId) → Accepted',
             { vendor_id: 'Eveys' },
             r,
             r.body?.status === 'Accepted' ? 'pass' : 'fail',
@@ -584,20 +613,26 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
 
     // ============ 10. TriggerMessage ============
     section('10. TriggerMessage');
-    for (const requested of ['Heartbeat', 'StatusNotification', 'MeterValues', 'BootNotification', 'FirmwareStatusNotification', 'DiagnosticsStatusNotification']) {
+    for (const requested of [
+        'Heartbeat',
+        'StatusNotification',
+        'MeterValues',
+        'BootNotification',
+        'FirmwareStatusNotification',
+        'DiagnosticsStatusNotification',
+    ]) {
         // Most variants need at least one numeric arg or just the message id;
         // gateway shape uses snake_case.
         const r = await gw('POST', `/charge-points/${cpId}/commands/trigger-message`, {
             requested_message: requested,
-            connector_id: requested === 'StatusNotification' || requested === 'MeterValues' ? 1 : undefined,
+            connector_id:
+                requested === 'StatusNotification' || requested === 'MeterValues' ? 1 : undefined,
         });
         record(
             `TriggerMessage ${requested}`,
             { requested_message: requested },
             r,
-            r.body?.status === 'Accepted' || r.body?.status === 'NotImplemented'
-                ? 'pass'
-                : 'fail',
+            r.body?.status === 'Accepted' || r.body?.status === 'NotImplemented' ? 'pass' : 'fail',
             `status=${r.body?.status}`,
         );
     }
@@ -667,8 +702,10 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
         for (const step of sec.steps) {
             if (step.req || step.res) {
                 md += `<details><summary>${step.name}</summary>\n\n`;
-                if (step.req) md += `**Request**\n\n\`\`\`json\n${JSON.stringify(step.req, null, 2)}\n\`\`\`\n\n`;
-                if (step.res) md += `**Response**\n\n\`\`\`json\n${JSON.stringify(step.res, null, 2)}\n\`\`\`\n\n`;
+                if (step.req)
+                    md += `**Request**\n\n\`\`\`json\n${JSON.stringify(step.req, null, 2)}\n\`\`\`\n\n`;
+                if (step.res)
+                    md += `**Response**\n\n\`\`\`json\n${JSON.stringify(step.res, null, 2)}\n\`\`\`\n\n`;
                 md += `</details>\n\n`;
             }
         }

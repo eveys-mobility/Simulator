@@ -31,7 +31,8 @@ if (aborted) console.log(`[server] aborted ${aborted} orphaned bench session(s) 
 // the engine isn't around to advance it. Delete every leftover
 // `bench_*` synthetic device since their owning run is gone.
 const failedRuns = store.failOrphanedBenchmarkRuns();
-if (failedRuns) console.log(`[server] failed ${failedRuns} orphaned benchmark run(s) from prior run`);
+if (failedRuns)
+    console.log(`[server] failed ${failedRuns} orphaned benchmark run(s) from prior run`);
 
 let benchDevicesCleaned = 0;
 for (const d of store.listDevices()) {
@@ -41,7 +42,9 @@ for (const d of store.listDevices()) {
     }
 }
 if (benchDevicesCleaned) {
-    console.log(`[server] removed ${benchDevicesCleaned} leftover bench_* device(s) from prior run`);
+    console.log(
+        `[server] removed ${benchDevicesCleaned} leftover bench_* device(s) from prior run`,
+    );
 }
 
 // Resolve initial default OCPP URL: persisted setting (if any) wins,

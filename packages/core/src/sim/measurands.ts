@@ -47,7 +47,11 @@ export function computeAcMeasurands(args: {
     const phases =
         wiring.phases === 1
             ? ([['L1', frame.l1]] as const)
-            : ([['L1', frame.l1], ['L2', frame.l2], ['L3', frame.l3]] as const);
+            : ([
+                  ['L1', frame.l1],
+                  ['L2', frame.l2],
+                  ['L3', frame.l3],
+              ] as const);
 
     const out: SampledValue[] = [
         {
@@ -136,8 +140,16 @@ export function computeDcMeasurands(args: {
  * means "no filter" (return everything). Unknown names in the CSV are
  * ignored; comparison is case-sensitive (OCPP measurand names are).
  */
-export function filterMeasurands(values: SampledValue[], csv: string | null | undefined): SampledValue[] {
+export function filterMeasurands(
+    values: SampledValue[],
+    csv: string | null | undefined,
+): SampledValue[] {
     if (!csv || !csv.trim()) return values;
-    const allowed = new Set(csv.split(',').map((s) => s.trim()).filter(Boolean));
+    const allowed = new Set(
+        csv
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+    );
     return values.filter((v) => v.measurand && allowed.has(v.measurand));
 }

@@ -67,7 +67,12 @@ export function resolveActiveLimit(args: ResolveArgs): ResolvedLimit {
         const candidates = profiles
             .filter((p) => p.chargingProfilePurpose === purpose && profileValidNow(p, now))
             // TxProfile must match the active session.
-            .filter((p) => purpose !== 'TxProfile' || p.transactionId === undefined || p.transactionId === transactionId)
+            .filter(
+                (p) =>
+                    purpose !== 'TxProfile' ||
+                    p.transactionId === undefined ||
+                    p.transactionId === transactionId,
+            )
             .sort((a, b) => b.stackLevel - a.stackLevel);
         const top = candidates[0];
         if (!top) continue;
@@ -76,7 +81,12 @@ export function resolveActiveLimit(args: ResolveArgs): ResolvedLimit {
         if (limitW === null) continue;
 
         if (winning.limitW === null || limitW < winning.limitW) {
-            winning = { limitW, profileId: top.chargingProfileId, purpose, stackLevel: top.stackLevel };
+            winning = {
+                limitW,
+                profileId: top.chargingProfileId,
+                purpose,
+                stackLevel: top.stackLevel,
+            };
         }
     }
     return winning;
@@ -93,7 +103,11 @@ function profileValidNow(p: ChargingProfile, now: number): boolean {
  * its schedule periods. Returns null when the schedule has no period
  * covering this moment (e.g. duration elapsed without recurring).
  */
-function limitInWattsAt(profile: ChargingProfile, now: number, sessionStartMs?: number): number | null {
+function limitInWattsAt(
+    profile: ChargingProfile,
+    now: number,
+    sessionStartMs?: number,
+): number | null {
     const sched = profile.chargingSchedule;
     const startMs = scheduleStartMs(profile, now, sessionStartMs);
     if (startMs === null) return null;
@@ -114,7 +128,11 @@ function limitInWattsAt(profile: ChargingProfile, now: number, sessionStartMs?: 
     return periodLimitInWatts(sched.chargingRateUnit, period, sched.minChargingRate);
 }
 
-function scheduleStartMs(profile: ChargingProfile, now: number, sessionStartMs?: number): number | null {
+function scheduleStartMs(
+    profile: ChargingProfile,
+    now: number,
+    sessionStartMs?: number,
+): number | null {
     if (profile.chargingProfileKind === 'Relative') {
         return sessionStartMs ?? null;
     }
@@ -126,7 +144,10 @@ function scheduleStartMs(profile: ChargingProfile, now: number, sessionStartMs?:
     return now;
 }
 
-function activePeriod(periods: ChargingSchedulePeriod[], elapsedSec: number): ChargingSchedulePeriod | null {
+function activePeriod(
+    periods: ChargingSchedulePeriod[],
+    elapsedSec: number,
+): ChargingSchedulePeriod | null {
     // Periods are sorted by startPeriod — pick the latest one whose
     // start is ≤ elapsed.
     let active: ChargingSchedulePeriod | null = null;
@@ -177,7 +198,12 @@ export function composeSchedule(args: {
         });
         if (r.limitW !== lastLimitW) {
             // Transition point. Use the requested unit on output.
-            const limitOut = r.limitW === null ? 0 : unit === 'W' ? r.limitW : r.limitW / (3 * NOMINAL_VOLTAGE_V);
+            const limitOut =
+                r.limitW === null
+                    ? 0
+                    : unit === 'W'
+                      ? r.limitW
+                      : r.limitW / (3 * NOMINAL_VOLTAGE_V);
             periods.push({ startPeriod: t, limit: limitOut, numberPhases: 3 });
             lastLimitW = r.limitW;
         }
@@ -187,6 +213,7 @@ export function composeSchedule(args: {
         duration: durationSeconds,
         startSchedule: new Date(startMs).toISOString(),
         chargingRateUnit: unit,
-        chargingSchedulePeriod: periods.length > 0 ? periods : [{ startPeriod: 0, limit: 0, numberPhases: 3 }],
+        chargingSchedulePeriod:
+            periods.length > 0 ? periods : [{ startPeriod: 0, limit: 0, numberPhases: 3 }],
     };
 }

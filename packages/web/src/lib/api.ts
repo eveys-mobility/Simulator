@@ -1,4 +1,12 @@
-import type { AcWiring, Connector, DCBatteryProfile, Device, DeviceType, PhaseMode, Session } from '@ocpp-sim/core';
+import type {
+    AcWiring,
+    Connector,
+    DCBatteryProfile,
+    Device,
+    DeviceType,
+    PhaseMode,
+    Session,
+} from '@ocpp-sim/core';
 import { clearToken, getToken } from './auth';
 
 export interface DeviceWithRuntime extends Device {
@@ -68,7 +76,11 @@ export const api = {
     restoreDevice: (id: string) => http<DeviceWithRuntime>('POST', `/devices/${id}/restore`),
     purgeDevice: (id: string) => http<void>('DELETE', `/devices/${id}/purge?confirm=PURGE`),
     startSession: (deviceId: string, connectorId: number) =>
-        http<{ sessionId: number; transactionId: number }>('POST', `/devices/${deviceId}/sessions`, { connectorId }),
+        http<{ sessionId: number; transactionId: number }>(
+            'POST',
+            `/devices/${deviceId}/sessions`,
+            { connectorId },
+        ),
     stopSession: (deviceId: string, connectorId: number, reason = 'Local') =>
         http<{
             ok: true;
@@ -116,10 +128,16 @@ export const api = {
                 localTxId: number | null;
             }>;
         }>('GET', `/devices/${deviceId}/queue`),
-    clearDeviceQueue: (deviceId: string, opts?: { action?: 'MeterValues' | 'StartTransaction' | 'StopTransaction' }) => {
+    clearDeviceQueue: (
+        deviceId: string,
+        opts?: { action?: 'MeterValues' | 'StartTransaction' | 'StopTransaction' },
+    ) => {
         const qs = new URLSearchParams({ confirm: 'CLEAR' });
         if (opts?.action) qs.set('action', opts.action);
-        return http<{ ok: true; removed: number }>('DELETE', `/devices/${deviceId}/queue?${qs.toString()}`);
+        return http<{ ok: true; removed: number }>(
+            'DELETE',
+            `/devices/${deviceId}/queue?${qs.toString()}`,
+        );
     },
 
     bulkCreateDevices: (body: {
@@ -151,7 +169,9 @@ export const api = {
     fleetReconnect: () => http<{ reconnecting: number }>('POST', '/fleet/reconnect'),
 
     fleetHeartbeatInterval: (seconds: number) =>
-        http<{ updated: number; seconds: number }>('POST', '/fleet/heartbeat-interval', { seconds }),
+        http<{ updated: number; seconds: number }>('POST', '/fleet/heartbeat-interval', {
+            seconds,
+        }),
 
     fleetEmergencyStop: () => http<{ stopped: number }>('POST', '/fleet/emergency-stop'),
 
@@ -207,8 +227,7 @@ export const api = {
         http<import('@ocpp-sim/core').BenchmarkRun>('GET', `/benchmark/runs/${id}`),
     startBenchmarkRun: (scenario: import('@ocpp-sim/core').Scenario) =>
         http<import('@ocpp-sim/core').BenchmarkRun>('POST', '/benchmark/runs', scenario),
-    stopBenchmarkRun: (id: number) =>
-        http<{ ok: true }>('POST', `/benchmark/runs/${id}/stop`),
+    stopBenchmarkRun: (id: number) => http<{ ok: true }>('POST', `/benchmark/runs/${id}/stop`),
 
     fleetStopAll: () =>
         http<{ devices: number; sessionsStopped: number }>('POST', '/fleet/stop-all'),

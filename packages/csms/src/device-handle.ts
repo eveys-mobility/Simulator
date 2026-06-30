@@ -28,7 +28,10 @@ type CallDevice = (action: string, payload: unknown) => Promise<unknown>;
  * the promise with the error code + description.
  */
 export class DeviceHandle {
-    constructor(private readonly state: DeviceState, private readonly callDevice: CallDevice) {}
+    constructor(
+        private readonly state: DeviceState,
+        private readonly callDevice: CallDevice,
+    ) {}
 
     get deviceId(): string {
         return this.state.deviceId;
@@ -75,7 +78,9 @@ export class DeviceHandle {
         if (existing) return Promise.resolve(existing);
         return new Promise<RecordedFrame>((resolve, reject) => {
             const timer = setTimeout(() => {
-                this.state.waiters = this.state.waiters.filter((w) => w.action !== action || w.resolve !== resolveOnce);
+                this.state.waiters = this.state.waiters.filter(
+                    (w) => w.action !== action || w.resolve !== resolveOnce,
+                );
                 reject(new Error(`waitForAction(${action}): timeout after ${timeoutMs}ms`));
             }, timeoutMs);
             const resolveOnce = (frame: RecordedFrame) => {
@@ -92,9 +97,14 @@ export class DeviceHandle {
     }
 
     /** Wait until a StatusNotification with the given status arrives for a connector. */
-    async waitForStatus(status: string, connectorId?: number, timeoutMs = 5000): Promise<RecordedFrame> {
+    async waitForStatus(
+        status: string,
+        connectorId?: number,
+        timeoutMs = 5000,
+    ): Promise<RecordedFrame> {
         const matches = (f: RecordedFrame): boolean => {
-            if (f.direction !== 'in' || f.type !== 'CALL' || f.action !== 'StatusNotification') return false;
+            if (f.direction !== 'in' || f.type !== 'CALL' || f.action !== 'StatusNotification')
+                return false;
             const p = (f.payload ?? {}) as Record<string, unknown>;
             if (p.status !== status) return false;
             if (connectorId !== undefined && p.connectorId !== connectorId) return false;
@@ -104,13 +114,17 @@ export class DeviceHandle {
         if (existing) return existing;
         return new Promise<RecordedFrame>((resolve, reject) => {
             const timer = setTimeout(() => {
-                this.state.anyFrameWaiters = this.state.anyFrameWaiters.filter((w) => w !== watcher);
+                this.state.anyFrameWaiters = this.state.anyFrameWaiters.filter(
+                    (w) => w !== watcher,
+                );
                 reject(new Error(`waitForStatus(${status}): timeout after ${timeoutMs}ms`));
             }, timeoutMs);
             const watcher = (f: RecordedFrame): void => {
                 if (matches(f)) {
                     clearTimeout(timer);
-                    this.state.anyFrameWaiters = this.state.anyFrameWaiters.filter((w) => w !== watcher);
+                    this.state.anyFrameWaiters = this.state.anyFrameWaiters.filter(
+                        (w) => w !== watcher,
+                    );
                     resolve(f);
                 }
             };
@@ -120,8 +134,12 @@ export class DeviceHandle {
 
     // ---- CSMS-initiated CALLs ----
 
-    remoteStart(args: { connectorId?: number; idTag: string }): Promise<{ status: 'Accepted' | 'Rejected' }> {
-        return this.callDevice('RemoteStartTransaction', args) as Promise<{ status: 'Accepted' | 'Rejected' }>;
+    remoteStart(args: { connectorId?: number; idTag: string }): Promise<{
+        status: 'Accepted' | 'Rejected';
+    }> {
+        return this.callDevice('RemoteStartTransaction', args) as Promise<{
+            status: 'Accepted' | 'Rejected';
+        }>;
     }
 
     remoteStop(transactionId: number): Promise<{ status: 'Accepted' | 'Rejected' }> {
@@ -134,7 +152,10 @@ export class DeviceHandle {
         return this.callDevice('Reset', { type }) as Promise<{ status: 'Accepted' | 'Rejected' }>;
     }
 
-    changeAvailability(connectorId: number, type: 'Operative' | 'Inoperative'): Promise<{
+    changeAvailability(
+        connectorId: number,
+        type: 'Operative' | 'Inoperative',
+    ): Promise<{
         status: 'Accepted' | 'Rejected' | 'Scheduled';
     }> {
         return this.callDevice('ChangeAvailability', { connectorId, type }) as Promise<{
@@ -142,14 +163,18 @@ export class DeviceHandle {
         }>;
     }
 
-    unlockConnector(connectorId: number): Promise<{ status: 'Unlocked' | 'UnlockFailed' | 'NotSupported' }> {
+    unlockConnector(
+        connectorId: number,
+    ): Promise<{ status: 'Unlocked' | 'UnlockFailed' | 'NotSupported' }> {
         return this.callDevice('UnlockConnector', { connectorId }) as Promise<{
             status: 'Unlocked' | 'UnlockFailed' | 'NotSupported';
         }>;
     }
 
     changeConfiguration(key: string, value: string): Promise<{ status: string }> {
-        return this.callDevice('ChangeConfiguration', { key, value }) as Promise<{ status: string }>;
+        return this.callDevice('ChangeConfiguration', { key, value }) as Promise<{
+            status: string;
+        }>;
     }
 
     getConfiguration(keys?: string[]): Promise<{
@@ -168,11 +193,18 @@ export class DeviceHandle {
         return this.callDevice('TriggerMessage', payload) as Promise<{ status: string }>;
     }
 
-    dataTransfer(vendorId: string, messageId?: string, data?: string): Promise<{ status: string; data?: string }> {
+    dataTransfer(
+        vendorId: string,
+        messageId?: string,
+        data?: string,
+    ): Promise<{ status: string; data?: string }> {
         const payload: Record<string, unknown> = { vendorId };
         if (messageId !== undefined) payload.messageId = messageId;
         if (data !== undefined) payload.data = data;
-        return this.callDevice('DataTransfer', payload) as Promise<{ status: string; data?: string }>;
+        return this.callDevice('DataTransfer', payload) as Promise<{
+            status: string;
+            data?: string;
+        }>;
     }
 
     clearCache(): Promise<{ status: string }> {
@@ -181,7 +213,10 @@ export class DeviceHandle {
 
     // ---- SmartCharging ----
 
-    setChargingProfile(connectorId: number, profile: ChargingProfile): Promise<{
+    setChargingProfile(
+        connectorId: number,
+        profile: ChargingProfile,
+    ): Promise<{
         status: 'Accepted' | 'Rejected' | 'NotSupported';
     }> {
         return this.callDevice('SetChargingProfile', {
@@ -190,12 +225,14 @@ export class DeviceHandle {
         }) as Promise<{ status: 'Accepted' | 'Rejected' | 'NotSupported' }>;
     }
 
-    clearChargingProfile(filter: {
-        id?: number;
-        connectorId?: number;
-        chargingProfilePurpose?: ChargingProfilePurpose;
-        stackLevel?: number;
-    } = {}): Promise<{ status: 'Accepted' | 'Unknown' }> {
+    clearChargingProfile(
+        filter: {
+            id?: number;
+            connectorId?: number;
+            chargingProfilePurpose?: ChargingProfilePurpose;
+            stackLevel?: number;
+        } = {},
+    ): Promise<{ status: 'Accepted' | 'Unknown' }> {
         return this.callDevice('ClearChargingProfile', filter) as Promise<{
             status: 'Accepted' | 'Unknown';
         }>;

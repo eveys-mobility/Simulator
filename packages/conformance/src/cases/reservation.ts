@@ -65,7 +65,9 @@ export const RESERVATION_CASES: ConformanceCase[] = [
 
             const ca = await handle.changeAvailability(1, 'Inoperative');
             if (ca.status !== 'Accepted') {
-                throw new Error(`ChangeAvailability Inoperative expected Accepted, got ${ca.status}`);
+                throw new Error(
+                    `ChangeAvailability Inoperative expected Accepted, got ${ca.status}`,
+                );
             }
             await handle.waitForStatus('Unavailable', 1);
 
@@ -139,7 +141,9 @@ export const RESERVATION_CASES: ConformanceCase[] = [
 
             const r = await handle.remoteStart({ connectorId: 1, idTag: 'TAG-RIGHT' });
             if (r.status !== 'Accepted') {
-                throw new Error(`RemoteStart with reserved idTag expected Accepted, got ${r.status}`);
+                throw new Error(
+                    `RemoteStart with reserved idTag expected Accepted, got ${r.status}`,
+                );
             }
             await handle.waitForStatus('Charging', 1);
         },
@@ -162,9 +166,7 @@ export const RESERVATION_CASES: ConformanceCase[] = [
 
             const r = await handle.remoteStart({ connectorId: 1, idTag: 'TAG-OTHER' });
             if (r.status !== 'Rejected') {
-                throw new Error(
-                    `RemoteStart with wrong idTag expected Rejected, got ${r.status}`,
-                );
+                throw new Error(`RemoteStart with wrong idTag expected Rejected, got ${r.status}`);
             }
         },
     },

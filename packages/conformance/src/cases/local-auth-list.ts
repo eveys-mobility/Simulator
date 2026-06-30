@@ -152,9 +152,7 @@ export const LOCAL_AUTH_LIST_CASES: ConformanceCase[] = [
             await handle.rawCall('SendLocalList', {
                 listVersion: 1,
                 updateType: 'Full',
-                localAuthorizationList: [
-                    { idTag: 'LOCAL-OK', idTagInfo: { status: 'Accepted' } },
-                ],
+                localAuthorizationList: [{ idTag: 'LOCAL-OK', idTagInfo: { status: 'Accepted' } }],
             });
 
             // The CSMS Authorize handler is rigged to refuse — if the
@@ -196,9 +194,7 @@ export const LOCAL_AUTH_LIST_CASES: ConformanceCase[] = [
             await handle.rawCall('SendLocalList', {
                 listVersion: 1,
                 updateType: 'Full',
-                localAuthorizationList: [
-                    { idTag: 'BAD-TAG', idTagInfo: { status: 'Blocked' } },
-                ],
+                localAuthorizationList: [{ idTag: 'BAD-TAG', idTagInfo: { status: 'Blocked' } }],
             });
 
             const r = await handle.remoteStart({ connectorId: 1, idTag: 'BAD-TAG' });

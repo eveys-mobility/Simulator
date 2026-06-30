@@ -7,9 +7,7 @@
     "engines": {
         "node": ">=20"
     },
-    "workspaces": [
-        "packages/*"
-    ],
+    "workspaces": ["packages/*"],
     "scripts": {
         "dev:server": "npm --workspace @ocpp-sim/server run dev",
         "dev:web": "npm --workspace @ocpp-sim/web run dev",

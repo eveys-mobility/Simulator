@@ -21,7 +21,9 @@ export const CONNECTION_TIMEOUT_CASES: ConformanceCase[] = [
             // Drop the window to 1s so the test isn't slow.
             const cfg = await handle.changeConfiguration('ConnectionTimeOut', '1');
             if (cfg.status !== 'Accepted') {
-                throw new Error(`ChangeConfiguration ConnectionTimeOut=1 expected Accepted, got ${cfg.status}`);
+                throw new Error(
+                    `ChangeConfiguration ConnectionTimeOut=1 expected Accepted, got ${cfg.status}`,
+                );
             }
 
             // Snapshot the current StatusNotification frame count so we
@@ -55,9 +57,9 @@ export const CONNECTION_TIMEOUT_CASES: ConformanceCase[] = [
                             (f.payload as { connectorId?: number }).connectorId === 1,
                     );
                 const fresh = c1.slice(beforeCount);
-                preparingSeen = preparingSeen || fresh.some(
-                    (f) => (f.payload as { status?: string }).status === 'Preparing',
-                );
+                preparingSeen =
+                    preparingSeen ||
+                    fresh.some((f) => (f.payload as { status?: string }).status === 'Preparing');
                 if (preparingSeen) {
                     // Look for Available *after* the Preparing frame.
                     const prepIdx = fresh.findIndex(
@@ -71,7 +73,9 @@ export const CONNECTION_TIMEOUT_CASES: ConformanceCase[] = [
             }
             if (!preparingSeen) throw new Error('connector never reported Preparing');
             if (!availableAfter) {
-                throw new Error('Preparing did not revert to Available within 4s of ConnectionTimeOut=1');
+                throw new Error(
+                    'Preparing did not revert to Available within 4s of ConnectionTimeOut=1',
+                );
             }
         },
     },
@@ -151,7 +155,8 @@ export const CONNECTION_TIMEOUT_CASES: ConformanceCase[] = [
                         f.direction === 'in' &&
                         f.type === 'CALL' &&
                         (f.payload as { connectorId?: number }).connectorId === 1,
-                ).slice(beforeCount);
+                )
+                .slice(beforeCount);
             const revertedToAvailable = after.some(
                 (f) => (f.payload as { status?: string }).status === 'Available',
             );

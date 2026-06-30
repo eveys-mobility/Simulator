@@ -14,12 +14,19 @@ describe('Scenario', () => {
     });
 
     it('rejects deviceCount above 500 (memory cap)', () => {
-        const r = ScenarioSchema.safeParse({ name: 'Huge', deviceCount: 501, totalDurationSeconds: 60 });
+        const r = ScenarioSchema.safeParse({
+            name: 'Huge',
+            deviceCount: 501,
+            totalDurationSeconds: 60,
+        });
         expect(r.success).toBe(false);
     });
 
     it('rejects deviceCount below 1', () => {
-        expect(ScenarioSchema.safeParse({ name: 'Zero', deviceCount: 0, totalDurationSeconds: 60 }).success).toBe(false);
+        expect(
+            ScenarioSchema.safeParse({ name: 'Zero', deviceCount: 0, totalDurationSeconds: 60 })
+                .success,
+        ).toBe(false);
     });
 
     it('every preset is a valid scenario', () => {

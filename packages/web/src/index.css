@@ -1,9 +1,9 @@
-@import '@fontsource-variable/inter/index.css';
+@import "@fontsource-variable/inter/index.css";
 /*
  * Clash Display from the foundry. The eveys.com site uses Clash for
  * display type (sampled from /assets/index-814c4624.css).
  */
-@import url('https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap');
+@import url("https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -71,7 +71,7 @@
         --foreground: 0 0% 96%;
         --card: 204 30% 14%;
         --card-foreground: 0 0% 96%;
-        --popover: 204 30% 16%;              /* slightly lifted from card so dropdowns read clearly */
+        --popover: 204 30% 16%; /* slightly lifted from card so dropdowns read clearly */
         --popover-foreground: 0 0% 96%;
         --primary: 13 88% 58%;
         --primary-foreground: 0 0% 100%;
@@ -83,7 +83,7 @@
         --accent-foreground: 204 30% 9%;
         --destructive: 348 88% 58%;
         --destructive-foreground: 0 0% 100%;
-        --border: 204 22% 14%;               /* hairline against the slate card */
+        --border: 204 22% 14%; /* hairline against the slate card */
         --input: 204 22% 16%;
         --ring: 13 88% 58%;
     }
@@ -100,12 +100,17 @@
 
     body {
         @apply bg-background text-foreground antialiased;
-        font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
-        font-feature-settings: 'cv11', 'ss01', 'ss03';
+        font-family: "Inter Variable", "Inter", system-ui, -apple-system, sans-serif;
+        font-feature-settings: "cv11", "ss01", "ss03";
     }
 
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'Clash Display', 'Inter Variable', system-ui, sans-serif;
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        font-family: "Clash Display", "Inter Variable", system-ui, sans-serif;
         font-weight: 600;
         letter-spacing: -0.01em;
     }
@@ -120,8 +125,13 @@
  * Subtle: 2s cycle, ring fade only — no scale to avoid layout thrash.
  */
 @keyframes ocpp-sim-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 hsl(var(--brand-green) / 0.5); }
-    50%      { box-shadow: 0 0 0 6px hsl(var(--brand-green) / 0); }
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 hsl(var(--brand-green) / 0.5);
+    }
+    50% {
+        box-shadow: 0 0 0 6px hsl(var(--brand-green) / 0);
+    }
 }
 
 .pulse-live {

@@ -39,10 +39,15 @@ describe('Simulator — CSMS call handling', () => {
 
     it('GetConfiguration with specific keys filters', async () => {
         const { sim } = newSim();
-        const r = await sim.handleCsmsCall('GetConfiguration', { key: ['HeartbeatInterval', 'NoSuchKey'] });
+        const r = await sim.handleCsmsCall('GetConfiguration', {
+            key: ['HeartbeatInterval', 'NoSuchKey'],
+        });
         expect(r.ok).toBe(true);
         if (!r.ok) return;
-        const result = r.result as { configurationKey: { key: string; value?: string }[]; unknownKey: string[] };
+        const result = r.result as {
+            configurationKey: { key: string; value?: string }[];
+            unknownKey: string[];
+        };
         expect(result.configurationKey).toHaveLength(1);
         expect(result.configurationKey[0]?.key).toBe('HeartbeatInterval');
         expect(result.unknownKey).toEqual(['NoSuchKey']);
@@ -51,7 +56,10 @@ describe('Simulator — CSMS call handling', () => {
 
     it('ChangeConfiguration Accepted on a writable key', async () => {
         const { sim } = newSim();
-        const r = await sim.handleCsmsCall('ChangeConfiguration', { key: 'HeartbeatInterval', value: '120' });
+        const r = await sim.handleCsmsCall('ChangeConfiguration', {
+            key: 'HeartbeatInterval',
+            value: '120',
+        });
         expect(r.ok).toBe(true);
         if (!r.ok) return;
         expect((r.result as { status: string }).status).toBe('Accepted');
@@ -60,7 +68,10 @@ describe('Simulator — CSMS call handling', () => {
 
     it('ChangeConfiguration Rejected on a readonly key', async () => {
         const { sim } = newSim();
-        const r = await sim.handleCsmsCall('ChangeConfiguration', { key: 'NumberOfConnectors', value: '5' });
+        const r = await sim.handleCsmsCall('ChangeConfiguration', {
+            key: 'NumberOfConnectors',
+            value: '5',
+        });
         expect(r.ok).toBe(true);
         if (!r.ok) return;
         expect((r.result as { status: string }).status).toBe('Rejected');
@@ -87,7 +98,10 @@ describe('Simulator — CSMS call handling', () => {
 
     it('ChangeAvailability flips Operative flag for an idle connector', async () => {
         const { sim } = newSim();
-        const r = await sim.handleCsmsCall('ChangeAvailability', { connectorId: 1, type: 'Inoperative' });
+        const r = await sim.handleCsmsCall('ChangeAvailability', {
+            connectorId: 1,
+            type: 'Inoperative',
+        });
         expect(r.ok).toBe(true);
         if (!r.ok) return;
         expect((r.result as { status: string }).status).toBe('Accepted');
@@ -125,7 +139,10 @@ describe('Simulator — CSMS call handling', () => {
 
     it('DataTransfer Accepted for own vendor', async () => {
         const { sim } = newSim();
-        const r = await sim.handleCsmsCall('DataTransfer', { vendorId: 'Eveys', messageId: 'ping' });
+        const r = await sim.handleCsmsCall('DataTransfer', {
+            vendorId: 'Eveys',
+            messageId: 'ping',
+        });
         expect(r.ok).toBe(true);
         if (!r.ok) return;
         expect((r.result as { status: string }).status).toBe('Accepted');

@@ -153,7 +153,6 @@ export function DeviceDetailPage() {
                 </div>
             )}
 
-
             <Card>
                 <CardHeader>
                     <CardTitle className="text-base">Device</CardTitle>
@@ -180,7 +179,13 @@ export function DeviceDetailPage() {
                                 <CardHeader className="flex-row items-center justify-between space-y-0">
                                     <CardTitle className="text-base">Connector {c.id}</CardTitle>
                                     <Badge
-                                        variant={charging ? 'online' : status === 'Faulted' ? 'destructive' : 'outline'}
+                                        variant={
+                                            charging
+                                                ? 'online'
+                                                : status === 'Faulted'
+                                                  ? 'destructive'
+                                                  : 'outline'
+                                        }
                                         className="gap-1.5"
                                     >
                                         {charging && <LiveDot pulse tone="green" />}
@@ -189,14 +194,34 @@ export function DeviceDetailPage() {
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="grid grid-cols-3 gap-2 text-sm">
-                                        <Metric label="Power" value={tick ? `${tick.powerKw.toFixed(1)} kW` : '— kW'} />
-                                        <Metric label="Energy" value={tick ? `${tick.energyKwh.toFixed(3)} kWh` : '— kWh'} />
-                                        <Metric label="SoC" value={tick?.socPct !== undefined ? `${tick.socPct.toFixed(0)} %` : '—'} />
+                                        <Metric
+                                            label="Power"
+                                            value={tick ? `${tick.powerKw.toFixed(1)} kW` : '— kW'}
+                                        />
+                                        <Metric
+                                            label="Energy"
+                                            value={
+                                                tick ? `${tick.energyKwh.toFixed(3)} kWh` : '— kWh'
+                                            }
+                                        />
+                                        <Metric
+                                            label="SoC"
+                                            value={
+                                                tick?.socPct !== undefined
+                                                    ? `${tick.socPct.toFixed(0)} %`
+                                                    : '—'
+                                            }
+                                        />
                                     </div>
                                     <div className="flex gap-2">
                                         <Button
                                             variant="default"
-                                            disabled={!online || charging || (startSession.isPending && startSession.variables === c.id)}
+                                            disabled={
+                                                !online ||
+                                                charging ||
+                                                (startSession.isPending &&
+                                                    startSession.variables === c.id)
+                                            }
                                             onClick={() => startSession.mutate(c.id)}
                                             className="flex-1"
                                         >
@@ -204,7 +229,11 @@ export function DeviceDetailPage() {
                                         </Button>
                                         <Button
                                             variant="outline"
-                                            disabled={!charging || (stopSession.isPending && stopSession.variables === c.id)}
+                                            disabled={
+                                                !charging ||
+                                                (stopSession.isPending &&
+                                                    stopSession.variables === c.id)
+                                            }
                                             onClick={() => stopSession.mutate(c.id)}
                                             className="flex-1"
                                         >

@@ -204,9 +204,11 @@ export const SMART_CHARGING_CASES: ConformanceCase[] = [
                 mv = inbound[inbound.length - 1] ?? null;
             }
             if (!mv) throw new Error('no MeterValues frame within 6s of Charging');
-            const sv: SampledValue[] = ((mv.payload as MvPayload).meterValue?.[0]?.sampledValue) ?? [];
+            const sv: SampledValue[] =
+                (mv.payload as MvPayload).meterValue?.[0]?.sampledValue ?? [];
             const totalPower = sv.find((v) => v.measurand === 'Power.Active.Import' && !v.phase);
-            if (!totalPower) throw new Error('Power.Active.Import (no phase) missing from MeterValues');
+            if (!totalPower)
+                throw new Error('Power.Active.Import (no phase) missing from MeterValues');
             const w = Number(totalPower.value);
             if (w !== 5000) {
                 throw new Error(`expected clamped power=5000W from the 5kW cap, got ${w}W`);

@@ -115,7 +115,9 @@ export class MockCsms {
     device(deviceId: string): DeviceHandle {
         const state = this.devices.get(deviceId);
         if (!state) throw new Error(`device ${deviceId} not connected`);
-        return new DeviceHandle(state, (action, payload) => this.callDevice(state, action, payload));
+        return new DeviceHandle(state, (action, payload) =>
+            this.callDevice(state, action, payload),
+        );
     }
 
     /** Wait for a device to connect. Resolves immediately if already in. */
@@ -244,7 +246,9 @@ export class MockCsms {
     ): Promise<void> {
         const handler = this.handlers[action];
         try {
-            const result = handler ? await handler(payload, { deviceId: dev.deviceId, action }) : {};
+            const result = handler
+                ? await handler(payload, { deviceId: dev.deviceId, action })
+                : {};
             if (dev.ws.readyState !== dev.ws.OPEN) return;
             const wire = encodeResult(id, result);
             dev.ws.send(wire);

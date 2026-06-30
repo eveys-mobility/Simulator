@@ -156,7 +156,12 @@ describe('Store — devices', () => {
         const s = new Store(':memory:');
         s.insertDevice({
             ...sample,
-            acWiring: { phases: 1, nominalVoltageV: 240, lineToLineV: 415, reportLineToLine: false },
+            acWiring: {
+                phases: 1,
+                nominalVoltageV: 240,
+                lineToLineV: 415,
+                reportLineToLine: false,
+            },
         });
         const d = s.getDevice(sample.id);
         expect(d?.acWiring).toEqual({
@@ -236,15 +241,13 @@ describe('Store — devices', () => {
         s.deleteDevice(sample.id);
         // Ensure deleted_at differs by at least 1ms so the ORDER BY
         // is deterministic; sqlite stores ISO-8601 strings literally.
-        s.db.prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`).run(
-            '2026-05-10T01:00:00.000Z',
-            sample.id,
-        );
+        s.db
+            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`)
+            .run('2026-05-10T01:00:00.000Z', sample.id);
         s.deleteDevice('cp_other');
-        s.db.prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`).run(
-            '2026-05-10T02:00:00.000Z',
-            'cp_other',
-        );
+        s.db
+            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`)
+            .run('2026-05-10T02:00:00.000Z', 'cp_other');
         const list = s.listDeletedDevices();
         expect(list).toHaveLength(2);
         expect(list[0]?.id).toBe('cp_other'); // newest deletion first
@@ -354,7 +357,13 @@ describe('Store — sessions', () => {
             energyWh: 0,
             peakPowerKw: 0,
         });
-        s.endSession({ id, endedAt: '2026-05-09T12:30:00.000Z', endReason: 'Local', energyWh: 5000, peakPowerKw: 10 });
+        s.endSession({
+            id,
+            endedAt: '2026-05-09T12:30:00.000Z',
+            endReason: 'Local',
+            energyWh: 5000,
+            peakPowerKw: 10,
+        });
         const completed = s.listSessions({ status: 'completed' });
         expect(completed).toHaveLength(1);
         expect(completed[0]?.energyWh).toBe(5000);

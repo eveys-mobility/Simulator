@@ -1,4 +1,13 @@
-import { Activity, BarChart3, ClipboardCheck, Cpu, Layers, LogOut, Settings, Zap } from 'lucide-react';
+import {
+    Activity,
+    BarChart3,
+    ClipboardCheck,
+    Cpu,
+    Layers,
+    LogOut,
+    Settings,
+    Zap,
+} from 'lucide-react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
@@ -46,8 +55,12 @@ function AuthedApp({ onLogout }: { onLogout: (() => void) | null }) {
                             <Zap className="h-4 w-4" strokeWidth={2.5} />
                         </div>
                         <div className="flex items-baseline gap-2">
-                            <span className="font-display text-lg font-semibold tracking-tight">eveys</span>
-                            <span className="text-sm font-medium text-muted-foreground">OCPP Simulator</span>
+                            <span className="font-display text-lg font-semibold tracking-tight">
+                                eveys
+                            </span>
+                            <span className="text-sm font-medium text-muted-foreground">
+                                OCPP Simulator
+                            </span>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">

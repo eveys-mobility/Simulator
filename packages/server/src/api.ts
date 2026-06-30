@@ -35,7 +35,13 @@ interface BuildArgs {
     webDistDir?: string | null;
 }
 
-export async function buildServer({ store, manager, defaultOcppUrl, authToken, webDistDir }: BuildArgs) {
+export async function buildServer({
+    store,
+    manager,
+    defaultOcppUrl,
+    authToken,
+    webDistDir,
+}: BuildArgs) {
     const app = Fastify({ logger: { level: 'info' } });
     await app.register(cors, { origin: true });
     await app.register(websocket);
@@ -58,7 +64,9 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             // (browser WebSocket has no way to set headers), or the
             // Sec-WebSocket-Protocol header (subprotocol).
             const header = req.headers.authorization ?? '';
-            let presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+            let presented = header.startsWith('Bearer ')
+                ? header.slice('Bearer '.length).trim()
+                : '';
             if (!presented) {
                 const qIdx = url.indexOf('?');
                 if (qIdx >= 0) {
@@ -148,7 +156,13 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             acWiring: input.type === 'AC' ? DEFAULT_AC_WIRING : undefined,
             dcProfile:
                 input.type === 'DC'
-                    ? { ...DCBatteryProfileSchema.parse({ capacityKwh: 60, chargerMaxKw: defaults.maxPowerKw }), ...input.dcProfile }
+                    ? {
+                          ...DCBatteryProfileSchema.parse({
+                              capacityKwh: 60,
+                              chargerMaxKw: defaults.maxPowerKw,
+                          }),
+                          ...input.dcProfile,
+                      }
                     : undefined,
             createdAt: new Date().toISOString(),
         };
@@ -197,7 +211,10 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 await new Promise((r) => setTimeout(r, body.data.staggerMs));
             }
         }
-        return { created: created.length, devices: created.map((d) => withRuntime(d, manager, store)) };
+        return {
+            created: created.length,
+            devices: created.map((d) => withRuntime(d, manager, store)),
+        };
     });
 
     app.get<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
@@ -223,7 +240,13 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
     /** Editing any of these requires reconnecting the OCPP socket so
      *  the gateway sees the new BootNotification. We refuse the edit
      *  if a session is active rather than yanking it mid-charge. */
-    const RESPAWN_FIELDS = ['vendor', 'firmwareVersion', 'maxPowerKw', 'ocppUrl', 'authPassword'] as const;
+    const RESPAWN_FIELDS = [
+        'vendor',
+        'firmwareVersion',
+        'maxPowerKw',
+        'ocppUrl',
+        'authPassword',
+    ] as const;
 
     app.patch<{ Params: { id: string } }>('/api/devices/:id', async (req, reply) => {
         const body = PatchDeviceBody.safeParse(req.body);
@@ -241,11 +264,17 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         }
 
         const mergedDcProfile = body.data.dcProfile
-            ? DCBatteryProfileSchema.parse({ ...(existing.dcProfile ?? {}), ...body.data.dcProfile })
+            ? DCBatteryProfileSchema.parse({
+                  ...(existing.dcProfile ?? {}),
+                  ...body.data.dcProfile,
+              })
             : existing.dcProfile;
 
         const mergedAcWiring = body.data.acWiring
-            ? AcWiringSchema.parse({ ...(existing.acWiring ?? DEFAULT_AC_WIRING), ...body.data.acWiring })
+            ? AcWiringSchema.parse({
+                  ...(existing.acWiring ?? DEFAULT_AC_WIRING),
+                  ...body.data.acWiring,
+              })
             : existing.acWiring;
 
         // Model string is derived from type + maxPowerKw so BootNotification
@@ -391,9 +420,7 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             const entries = Object.entries(body.data.changes);
             const results = entries.map(([key, value]) => {
                 const status = sim.setOcppConfig(key, value);
-                const after = sim
-                    .getOcppConfig([key])
-                    .configurationKey.find((k) => k.key === key);
+                const after = sim.getOcppConfig([key]).configurationKey.find((k) => k.key === key);
                 return { key, status, value: after?.value ?? value };
             });
             return { results };
@@ -469,14 +496,24 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
             peakPowerKw: 0,
         });
         try {
-            const transactionId = await sim.startSession(body.data.connectorId, idTag, sessionRowId);
+            const transactionId = await sim.startSession(
+                body.data.connectorId,
+                idTag,
+                sessionRowId,
+            );
             // Patch the placeholder transaction_id with the real one from the gateway.
             store.db
                 .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
                 .run(transactionId, sessionRowId);
             return { sessionId: sessionRowId, transactionId };
         } catch (err) {
-            store.endSession({ id: sessionRowId, endedAt: new Date().toISOString(), endReason: 'aborted', energyWh: 0, peakPowerKw: 0 });
+            store.endSession({
+                id: sessionRowId,
+                endedAt: new Date().toISOString(),
+                endReason: 'aborted',
+                energyWh: 0,
+                peakPowerKw: 0,
+            });
             return reply.code(500).send({ error: (err as Error).message });
         }
     });
@@ -553,18 +590,21 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         }
     });
 
-    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/plug-out', async (req, reply) => {
-        const body = ConnectorIdBody.safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: body.error.message });
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        try {
-            await sim.plugOut(body.data.connectorId);
-            return { ok: true };
-        } catch (err) {
-            return reply.code(500).send({ error: (err as Error).message });
-        }
-    });
+    app.post<{ Params: { id: string } }>(
+        '/api/devices/:id/actions/plug-out',
+        async (req, reply) => {
+            const body = ConnectorIdBody.safeParse(req.body);
+            if (!body.success) return reply.code(400).send({ error: body.error.message });
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            try {
+                await sim.plugOut(body.data.connectorId);
+                return { ok: true };
+            } catch (err) {
+                return reply.code(500).send({ error: (err as Error).message });
+            }
+        },
+    );
 
     app.post<{ Params: { id: string } }>('/api/devices/:id/actions/swipe', async (req, reply) => {
         const body = SwipeBody.safeParse(req.body);
@@ -592,46 +632,58 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
         }
     });
 
-    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/clear-fault', async (req, reply) => {
-        const body = ConnectorIdBody.safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: body.error.message });
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        try {
-            await sim.clearFault(body.data.connectorId);
-            return { ok: true };
-        } catch (err) {
-            return reply.code(500).send({ error: (err as Error).message });
-        }
-    });
+    app.post<{ Params: { id: string } }>(
+        '/api/devices/:id/actions/clear-fault',
+        async (req, reply) => {
+            const body = ConnectorIdBody.safeParse(req.body);
+            if (!body.success) return reply.code(400).send({ error: body.error.message });
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            try {
+                await sim.clearFault(body.data.connectorId);
+                return { ok: true };
+            } catch (err) {
+                return reply.code(500).send({ error: (err as Error).message });
+            }
+        },
+    );
 
-    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/emergency-stop', async (req, reply) => {
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        try {
-            await sim.emergencyStop();
-            return { ok: true };
-        } catch (err) {
-            return reply.code(500).send({ error: (err as Error).message });
-        }
-    });
+    app.post<{ Params: { id: string } }>(
+        '/api/devices/:id/actions/emergency-stop',
+        async (req, reply) => {
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            try {
+                await sim.emergencyStop();
+                return { ok: true };
+            } catch (err) {
+                return reply.code(500).send({ error: (err as Error).message });
+            }
+        },
+    );
 
     /** Operator-controlled offline mode. Distinct from a network blip:
      *  this stays offline (auto-reconnect suppressed) until /reconnect
      *  is called. Used to exercise the offline transaction queue. */
-    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/disconnect', async (req, reply) => {
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        sim.forceOffline();
-        return { ok: true, forcedOffline: true };
-    });
+    app.post<{ Params: { id: string } }>(
+        '/api/devices/:id/actions/disconnect',
+        async (req, reply) => {
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            sim.forceOffline();
+            return { ok: true, forcedOffline: true };
+        },
+    );
 
-    app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reconnect', async (req, reply) => {
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        sim.goOnline();
-        return { ok: true, forcedOffline: false };
-    });
+    app.post<{ Params: { id: string } }>(
+        '/api/devices/:id/actions/reconnect',
+        async (req, reply) => {
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            sim.goOnline();
+            return { ok: true, forcedOffline: false };
+        },
+    );
 
     /** Inspect the per-device offline buffer. Returns the rows the CP
      *  has queued and is waiting to send on the next CSMS reconnect. */
@@ -654,11 +706,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                 return reply.code(404).send({ error: 'device not found' });
             }
             if (req.query.confirm !== 'CLEAR') {
-                return reply.code(400).send({ error: "missing ?confirm=CLEAR" });
+                return reply.code(400).send({ error: 'missing ?confirm=CLEAR' });
             }
             const action = req.query.action;
             // Only allow filtering by the actions we actually queue.
-            if (action && !['MeterValues', 'StartTransaction', 'StopTransaction'].includes(action)) {
+            if (
+                action &&
+                !['MeterValues', 'StartTransaction', 'StopTransaction'].includes(action)
+            ) {
                 return reply.code(400).send({ error: 'invalid action filter' });
             }
             const removed = store.clearPendingMessages(req.params.id, action);
@@ -696,11 +751,14 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
      * List installed SmartCharging profiles for a device. Read-only;
      * profile install/clear is CSMS-driven by design.
      */
-    app.get<{ Params: { id: string } }>('/api/devices/:id/charging-profiles', async (req, reply) => {
-        const sim = manager.get(req.params.id);
-        if (!sim) return reply.code(404).send({ error: 'device not found' });
-        return store.listChargingProfiles(req.params.id);
-    });
+    app.get<{ Params: { id: string } }>(
+        '/api/devices/:id/charging-profiles',
+        async (req, reply) => {
+            const sim = manager.get(req.params.id);
+            if (!sim) return reply.code(404).send({ error: 'device not found' });
+            return store.listChargingProfiles(req.params.id);
+        },
+    );
 
     app.post<{ Params: { id: string } }>('/api/devices/:id/actions/reboot', async (req, reply) => {
         const body = RebootBody.safeParse(req.body);
@@ -770,13 +828,20 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                     peakPowerKw: 0,
                 });
                 const txId = await t.sim.startSession(t.connectorId, body.data.idTag, sessionRowId);
-                store.db.prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`).run(txId, sessionRowId);
+                store.db
+                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                    .run(txId, sessionRowId);
                 started++;
             } catch (err) {
                 errors.push((err as Error).message);
             }
         }
-        return { eligible: targets.length, picked: picked.length, started, errors: errors.slice(0, 10) };
+        return {
+            eligible: targets.length,
+            picked: picked.length,
+            started,
+            errors: errors.slice(0, 10),
+        };
     });
 
     app.post('/api/fleet/reconnect', async () => {
@@ -914,7 +979,8 @@ export async function buildServer({ store, manager, defaultOcppUrl, authToken, w
                     frameBuffer.length = 0;
                 }
                 if (coalescedFrames.size > 0) {
-                    for (const payload of coalescedFrames.values()) send({ type: 'frame', payload });
+                    for (const payload of coalescedFrames.values())
+                        send({ type: 'frame', payload });
                     coalescedFrames.clear();
                 }
                 if (droppedByDevice.size > 0) {

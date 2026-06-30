@@ -145,7 +145,9 @@ describe('MockCsms', () => {
         let mv: { payload: unknown } | null = null;
         for (let i = 0; i < 30 && !mv; i++) {
             await sleep(200);
-            const inbound = handle.framesFor('MeterValues').filter((f) => f.direction === 'in' && f.type === 'CALL');
+            const inbound = handle
+                .framesFor('MeterValues')
+                .filter((f) => f.direction === 'in' && f.type === 'CALL');
             mv = inbound[inbound.length - 1] ?? null;
         }
         expect(mv).not.toBeNull();
@@ -251,9 +253,17 @@ describe('MockCsms', () => {
                 BootNotification: () => {
                     bootCount += 1;
                     if (bootCount === 1) {
-                        return { status: 'Rejected', currentTime: new Date().toISOString(), interval: 1 };
+                        return {
+                            status: 'Rejected',
+                            currentTime: new Date().toISOString(),
+                            interval: 1,
+                        };
                     }
-                    return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
+                    return {
+                        status: 'Accepted',
+                        currentTime: new Date().toISOString(),
+                        interval: 300,
+                    };
                 },
             },
         });
@@ -271,7 +281,9 @@ describe('MockCsms', () => {
             // any StatusNotification — only BootNotification is allowed
             // by §4.2 in the Rejected state.
             await sleep(300);
-            const earlyStatus = handle.framesFor('StatusNotification').filter((f) => f.direction === 'in');
+            const earlyStatus = handle
+                .framesFor('StatusNotification')
+                .filter((f) => f.direction === 'in');
             expect(earlyStatus.length).toBe(0);
 
             // The retry should fire within ~1s and the second boot
@@ -300,9 +312,17 @@ describe('MockCsms', () => {
                 BootNotification: () => {
                     bootCount += 1;
                     if (bootCount === 1) {
-                        return { status: 'Pending', currentTime: new Date().toISOString(), interval: 1 };
+                        return {
+                            status: 'Pending',
+                            currentTime: new Date().toISOString(),
+                            interval: 1,
+                        };
                     }
-                    return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
+                    return {
+                        status: 'Accepted',
+                        currentTime: new Date().toISOString(),
+                        interval: 300,
+                    };
                 },
             },
         });

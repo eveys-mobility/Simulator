@@ -159,7 +159,9 @@ export const CORE_CASES: ConformanceCase[] = [
                 throw new Error('HeartbeatInterval missing from configurationKey');
             }
             if (!cfg.unknownKey.includes('NotARealKey')) {
-                throw new Error(`NotARealKey expected in unknownKey, got ${JSON.stringify(cfg.unknownKey)}`);
+                throw new Error(
+                    `NotARealKey expected in unknownKey, got ${JSON.stringify(cfg.unknownKey)}`,
+                );
             }
         },
     },
@@ -177,7 +179,9 @@ export const CORE_CASES: ConformanceCase[] = [
             const cfg = await handle.getConfiguration(['MeterValueSampleInterval']);
             const v = cfg.configurationKey.find((k) => k.key === 'MeterValueSampleInterval')?.value;
             if (v !== '42') {
-                throw new Error(`expected MeterValueSampleInterval='42' after write, got ${String(v)}`);
+                throw new Error(
+                    `expected MeterValueSampleInterval='42' after write, got ${String(v)}`,
+                );
             }
         },
     },
@@ -247,11 +251,15 @@ export const CORE_CASES: ConformanceCase[] = [
 
             const r = await handle.remoteStart({ connectorId: 1, idTag: 'BAD' });
             if (r.status !== 'Rejected') {
-                throw new Error(`RemoteStart with Invalid Authorize expected Rejected, got ${r.status}`);
+                throw new Error(
+                    `RemoteStart with Invalid Authorize expected Rejected, got ${r.status}`,
+                );
             }
             // No StartTransaction CALL must follow.
             await sleep(200);
-            const startCalls = handle.framesFor('StartTransaction').filter((f) => f.direction === 'in');
+            const startCalls = handle
+                .framesFor('StartTransaction')
+                .filter((f) => f.direction === 'in');
             if (startCalls.length > 0) {
                 throw new Error('StartTransaction was sent despite Invalid Authorize');
             }
@@ -399,9 +407,7 @@ export const CORE_CASES: ConformanceCase[] = [
         profile: 'Core',
         run: async ({ handle }) => {
             await handle.waitForBoot();
-            const before = handle
-                .framesFor('Heartbeat')
-                .filter((f) => f.direction === 'in').length;
+            const before = handle.framesFor('Heartbeat').filter((f) => f.direction === 'in').length;
             const r = await handle.triggerMessage('Heartbeat');
             if (r.status !== 'Accepted') {
                 throw new Error(`TriggerMessage Heartbeat expected Accepted, got ${r.status}`);
@@ -410,7 +416,9 @@ export const CORE_CASES: ConformanceCase[] = [
             // asynchronously after replying Accepted.
             const deadline = Date.now() + 1000;
             while (Date.now() < deadline) {
-                const after = handle.framesFor('Heartbeat').filter((f) => f.direction === 'in').length;
+                const after = handle
+                    .framesFor('Heartbeat')
+                    .filter((f) => f.direction === 'in').length;
                 if (after > before) return;
                 await sleep(50);
             }
@@ -430,7 +438,9 @@ export const CORE_CASES: ConformanceCase[] = [
                 .filter((f) => f.direction === 'in').length;
             const r = await handle.triggerMessage('StatusNotification', 1);
             if (r.status !== 'Accepted') {
-                throw new Error(`TriggerMessage StatusNotification expected Accepted, got ${r.status}`);
+                throw new Error(
+                    `TriggerMessage StatusNotification expected Accepted, got ${r.status}`,
+                );
             }
             const deadline = Date.now() + 1000;
             while (Date.now() < deadline) {

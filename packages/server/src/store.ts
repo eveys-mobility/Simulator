@@ -235,32 +235,38 @@ export class Store {
             .run(args);
     }
 
-    listSessions(filter: {
-        deviceId?: string;
-        status?: Session['status'];
-        idTag?: string;
-        since?: string;
-        until?: string;
-        limit?: number;
-        offset?: number;
-    } = {}): Session[] {
+    listSessions(
+        filter: {
+            deviceId?: string;
+            status?: Session['status'];
+            idTag?: string;
+            since?: string;
+            until?: string;
+            limit?: number;
+            offset?: number;
+        } = {},
+    ): Session[] {
         const { sql, params } = buildSessionWhere(filter);
         params.limit = filter.limit ?? 100;
         params.offset = filter.offset ?? 0;
         const rows = this.db
-            .prepare(`SELECT * FROM sessions ${sql} ORDER BY started_at DESC LIMIT @limit OFFSET @offset`)
+            .prepare(
+                `SELECT * FROM sessions ${sql} ORDER BY started_at DESC LIMIT @limit OFFSET @offset`,
+            )
             .all(params) as SessionRow[];
         return rows.map(rowToSession);
     }
 
     /** Total count for the same filter — used by the UI for pagination. */
-    countSessions(filter: {
-        deviceId?: string;
-        status?: Session['status'];
-        idTag?: string;
-        since?: string;
-        until?: string;
-    } = {}): number {
+    countSessions(
+        filter: {
+            deviceId?: string;
+            status?: Session['status'];
+            idTag?: string;
+            since?: string;
+            until?: string;
+        } = {},
+    ): number {
         const { sql, params } = buildSessionWhere(filter);
         const row = this.db.prepare(`SELECT COUNT(*) as n FROM sessions ${sql}`).get(params) as
             | { n: number }
@@ -340,12 +346,15 @@ export class Store {
      * are optional; an empty filter clears every profile on the device.
      * Returns the number of rows removed.
      */
-    clearChargingProfiles(deviceId: string, filter: {
-        id?: number;
-        connectorId?: number;
-        purpose?: ChargingProfilePurpose;
-        stackLevel?: number;
-    }): number {
+    clearChargingProfiles(
+        deviceId: string,
+        filter: {
+            id?: number;
+            connectorId?: number;
+            purpose?: ChargingProfilePurpose;
+            stackLevel?: number;
+        },
+    ): number {
         const where = ['device_id = @deviceId'];
         const params: Record<string, unknown> = { deviceId };
         if (filter.id !== undefined) {
@@ -370,13 +379,17 @@ export class Store {
         return r.changes;
     }
 
-    listChargingProfiles(deviceId: string, connectorId?: number): {
+    listChargingProfiles(
+        deviceId: string,
+        connectorId?: number,
+    ): {
         connectorId: number;
         profile: ChargingProfile;
     }[] {
-        const sql = connectorId !== undefined
-            ? `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ? AND connector_id = ?`
-            : `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ?`;
+        const sql =
+            connectorId !== undefined
+                ? `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ? AND connector_id = ?`
+                : `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ?`;
         const rows = (
             connectorId !== undefined
                 ? this.db.prepare(sql).all(deviceId, connectorId)
@@ -438,13 +451,18 @@ export class Store {
             });
     }
 
-    listBenchmarkRuns(args: { limit?: number; offset?: number } = {}): { runs: BenchmarkRun[]; total: number } {
+    listBenchmarkRuns(args: { limit?: number; offset?: number } = {}): {
+        runs: BenchmarkRun[];
+        total: number;
+    } {
         const limit = Math.max(1, Math.min(200, args.limit ?? 50));
         const offset = Math.max(0, args.offset ?? 0);
         const rows = this.db
             .prepare(`SELECT * FROM benchmark_runs ORDER BY started_at DESC LIMIT ? OFFSET ?`)
             .all(limit, offset) as BenchmarkRunRow[];
-        const total = (this.db.prepare(`SELECT COUNT(*) as n FROM benchmark_runs`).get() as { n: number }).n;
+        const total = (
+            this.db.prepare(`SELECT COUNT(*) as n FROM benchmark_runs`).get() as { n: number }
+        ).n;
         return { runs: rows.map(rowToBenchmarkRun), total };
     }
 
@@ -525,9 +543,7 @@ export class Store {
      */
     replaceLocalAuthList(deviceId: string, listVersion: number, list: AuthorizationData[]): void {
         const tx = this.db.transaction(() => {
-            this.db
-                .prepare(`DELETE FROM local_auth_entries WHERE device_id = ?`)
-                .run(deviceId);
+            this.db.prepare(`DELETE FROM local_auth_entries WHERE device_id = ?`).run(deviceId);
             const insert = this.db.prepare(
                 `INSERT INTO local_auth_entries (device_id, id_tag, status, expiry_date, parent_id_tag)
                  VALUES (?, ?, ?, ?, ?)`,

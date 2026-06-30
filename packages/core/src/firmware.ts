@@ -26,12 +26,7 @@ export const FirmwareStatus = z.enum([
 ]);
 export type FirmwareStatus = z.infer<typeof FirmwareStatus>;
 
-export const DiagnosticsStatus = z.enum([
-    'Idle',
-    'Uploading',
-    'Uploaded',
-    'UploadFailed',
-]);
+export const DiagnosticsStatus = z.enum(['Idle', 'Uploading', 'Uploaded', 'UploadFailed']);
 export type DiagnosticsStatus = z.infer<typeof DiagnosticsStatus>;
 
 export const UpdateFirmwareReqSchema = z.object({
