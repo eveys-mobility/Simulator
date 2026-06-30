@@ -110,6 +110,17 @@ docker run --rm -d -p 3001:3001 \
     --name ocpp-sim ocpp-sim
 ```
 
+### Updating a running deployment
+
+Once the systemd unit from the full guide is in place, deploying a new version is one command on the server:
+
+```sh
+cd /opt/ocpp-sim
+make update
+```
+
+That runs `git pull`, rebuilds the Docker image, restarts the `ocpp-sim` systemd service, and prints its status. Override the unit name with `make update SERVICE=my-name` if yours differs.
+
 The full deployment guide — including a fresh-Ubuntu walkthrough with TLS, firewall, and auto-restart on boot — is in **[`docs/RUNNING.md`](docs/RUNNING.md)**.
 
 ## License
