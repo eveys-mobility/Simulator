@@ -805,6 +805,7 @@ export async function buildServer({
         // Fisher–Yates shuffle so the picked subset is random.
         for (let i = targets.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
+            // biome-ignore lint/style/noNonNullAssertion: i,j are in [0, length) by loop bounds
             [targets[i], targets[j]] = [targets[j]!, targets[i]!];
         }
         const want = Math.floor(targets.length * body.data.fraction);

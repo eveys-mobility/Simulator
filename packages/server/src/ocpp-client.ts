@@ -284,7 +284,7 @@ export class OcppClient extends EventEmitter {
     }
 
     private handleFrame(raw: string): void {
-        let frame;
+        let frame: ReturnType<typeof decodeFrame>;
         try {
             frame = decodeFrame(raw);
         } catch (err) {

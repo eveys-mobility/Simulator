@@ -175,7 +175,7 @@ export class MockCsms {
     }
 
     private onMessage(dev: DeviceState, raw: string): void {
-        let frame;
+        let frame: ReturnType<typeof decodeFrame>;
         try {
             frame = decodeFrame(raw);
         } catch (err) {

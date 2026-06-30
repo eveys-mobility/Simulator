@@ -455,6 +455,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
+        // biome-ignore lint/a11y/noLabelWithoutControl: input is a descendant via `children`
         <label className="flex flex-col gap-1.5">
             <span className="text-xs text-muted-foreground">{label}</span>
             {children}

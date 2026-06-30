@@ -132,6 +132,7 @@ export function DevicesPage() {
     useEffect(() => {
         if (page > totalPages - 1) setPage(0);
     }, [page, totalPages]);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional triggers — reset page when filters/page-size change
     useEffect(() => {
         setPage(0);
     }, [statusFilter, typeFilter, connectorFilter, search, pageSize]);
@@ -646,15 +647,18 @@ function NewDeviceForm({
                     className="flex flex-col gap-3 sm:flex-row sm:items-end"
                 >
                     <div className="flex-1 space-y-1">
-                        <label className="text-xs text-muted-foreground">Display name</label>
-                        <Input
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="e.g. Lobby AC #1"
-                        />
+                        {/* biome-ignore lint/a11y/noLabelWithoutControl: <Input> renders the control as a descendant */}
+                        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                            Display name
+                            <Input
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                placeholder="e.g. Lobby AC #1"
+                            />
+                        </label>
                     </div>
                     <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Type</label>
+                        <span className="block text-xs text-muted-foreground">Type</span>
                         <div className="flex gap-1">
                             <Button
                                 type="button"

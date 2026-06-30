@@ -145,6 +145,7 @@ export function DeviceDetailPage() {
             <EditDeviceDialog device={device} open={editing} onOpenChange={setEditing} />
 
             {notice && (
+                // biome-ignore lint/a11y/useSemanticElements: <output> is for form-computed values; this is a live notice region
                 <div
                     role="status"
                     className="rounded-md border border-brand-orange/40 bg-brand-orange/10 px-3 py-2 text-sm text-foreground"

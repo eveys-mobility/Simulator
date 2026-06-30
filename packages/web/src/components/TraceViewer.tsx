@@ -70,6 +70,7 @@ export function TraceViewer({ deviceId }: Props) {
 
     // Auto-scroll on new entries when follow is on.
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `filtered` is the trigger — re-scroll when new entries arrive
     useEffect(() => {
         if (!follow) return;
         const el = scrollRef.current;

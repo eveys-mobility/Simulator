@@ -228,7 +228,10 @@ function RunTab() {
     const running = latest && start.data?.status === 'running';
 
     const stop = useMutation({
-        mutationFn: () => api.stopBenchmarkRun(latestRunId!),
+        mutationFn: () => {
+            if (!latestRunId) throw new Error('No active benchmark run to stop');
+            return api.stopBenchmarkRun(latestRunId);
+        },
         onSuccess: () => qc.invalidateQueries({ queryKey: ['benchmark-runs'] }),
     });
 
