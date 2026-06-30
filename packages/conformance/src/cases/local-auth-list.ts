@@ -161,8 +161,7 @@ export const LOCAL_AUTH_LIST_CASES: ConformanceCase[] = [
             const r = await handle.remoteStart({ connectorId: 1, idTag: 'LOCAL-OK' });
             if (r.status !== 'Accepted') {
                 throw new Error(
-                    `RemoteStart with locally-Accepted idTag expected Accepted, got ${r.status} ` +
-                        '— local-pre-authorize path did not skip the CSMS',
+                    `RemoteStart with locally-Accepted idTag expected Accepted, got ${r.status} — local-pre-authorize path did not skip the CSMS`,
                 );
             }
             // No Authorize CALL must have been sent.

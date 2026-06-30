@@ -675,7 +675,7 @@ export class Simulator extends EventEmitter {
         try {
             const txId = await this.startSession(connectorId, idTag, sessionRowId);
             this.store.db
-                .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                 .run(txId, sessionRowId);
             return 'started';
         } catch (err) {
@@ -950,7 +950,7 @@ export class Simulator extends EventEmitter {
                             c.localTransactionId = null;
                             if (c.sessionRowId !== null) {
                                 this.store.db
-                                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                                    .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                                     .run(realTxId, c.sessionRowId);
                             }
                         }
@@ -1334,7 +1334,7 @@ export class Simulator extends EventEmitter {
         void this.startSession(target, idTag, sessionRowId)
             .then((txId) => {
                 this.store.db
-                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                    .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                     .run(txId, sessionRowId);
             })
             .catch((err) => {

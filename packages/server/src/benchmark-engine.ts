@@ -254,7 +254,7 @@ export class BenchmarkEngine extends EventEmitter {
                 sim.startSession(free.id, 'BENCH-TAG', sessionRowId)
                     .then((txId) => {
                         this.store.db
-                            .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                            .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                             .run(txId, sessionRowId);
                     })
                     .catch(() => {

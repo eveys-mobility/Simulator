@@ -76,7 +76,7 @@ export function BufferMemoryCard({ deviceId }: { deviceId: string }) {
                         variant="outline"
                         size="sm"
                         onClick={() => clearMeters.mutate()}
-                        disabled={clearMeters.isPending || (counts['MeterValues'] ?? 0) === 0}
+                        disabled={clearMeters.isPending || (counts.MeterValues ?? 0) === 0}
                         title="Discard buffered MeterValues only — preserves Start/Stop so the transaction record stays intact"
                     >
                         <Trash2 className="h-3.5 w-3.5" /> Clear MeterValues

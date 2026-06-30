@@ -242,11 +242,11 @@ describe('Store — devices', () => {
         // Ensure deleted_at differs by at least 1ms so the ORDER BY
         // is deterministic; sqlite stores ISO-8601 strings literally.
         s.db
-            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`)
+            .prepare('UPDATE devices SET deleted_at = ? WHERE id = ?')
             .run('2026-05-10T01:00:00.000Z', sample.id);
         s.deleteDevice('cp_other');
         s.db
-            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ?`)
+            .prepare('UPDATE devices SET deleted_at = ? WHERE id = ?')
             .run('2026-05-10T02:00:00.000Z', 'cp_other');
         const list = s.listDeletedDevices();
         expect(list).toHaveLength(2);

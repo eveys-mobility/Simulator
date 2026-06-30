@@ -322,7 +322,7 @@ export async function buildServer({
         // Model lives in the same row but isn't in the patch type (clients
         // can't set it directly). Update it via raw SQL when it changed.
         if (model !== existing.model) {
-            store.db.prepare(`UPDATE devices SET model = ? WHERE id = ?`).run(model, req.params.id);
+            store.db.prepare('UPDATE devices SET model = ? WHERE id = ?').run(model, req.params.id);
         }
 
         if (changedRespawnFields.length > 0) {
@@ -503,7 +503,7 @@ export async function buildServer({
             );
             // Patch the placeholder transaction_id with the real one from the gateway.
             store.db
-                .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                 .run(transactionId, sessionRowId);
             return { sessionId: sessionRowId, transactionId };
         } catch (err) {
@@ -829,7 +829,7 @@ export async function buildServer({
                 });
                 const txId = await t.sim.startSession(t.connectorId, body.data.idTag, sessionRowId);
                 store.db
-                    .prepare(`UPDATE sessions SET transaction_id = ? WHERE id = ?`)
+                    .prepare('UPDATE sessions SET transaction_id = ? WHERE id = ?')
                     .run(txId, sessionRowId);
                 started++;
             } catch (err) {

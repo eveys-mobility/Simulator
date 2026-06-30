@@ -151,13 +151,13 @@ describe('MockCsms', () => {
             mv = inbound[inbound.length - 1] ?? null;
         }
         expect(mv).not.toBeNull();
-        const payload = mv!.payload as {
+        const payload = mv?.payload as {
             meterValue: { sampledValue: { measurand: string; phase?: string; value: string }[] }[];
         };
         const sv = payload.meterValue[0]?.sampledValue ?? [];
         const totalPower = sv.find((v) => v.measurand === 'Power.Active.Import' && !v.phase);
         expect(totalPower).toBeTruthy();
-        expect(Number(totalPower!.value)).toBe(5000);
+        expect(Number(totalPower?.value)).toBe(5000);
     });
 
     it('GetCompositeSchedule returns the resolved schedule', async () => {
