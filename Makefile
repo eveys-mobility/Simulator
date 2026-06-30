@@ -7,6 +7,7 @@ HOST           ?= 127.0.0.1
 PORT           ?= 3001
 IMAGE          ?= ocpp-sim
 CONTAINER      ?= ocpp-sim
+SERVICE        ?= ocpp-sim
 DATA_VOLUME    ?= ocpp-sim-data
 AUTH_TOKEN     ?=
 
@@ -25,9 +26,11 @@ help: ## Show this help
 install: ## Install all workspace dependencies
 	npm install
 
-update: ## Update dependencies and refresh the lockfile
-	npm update
-	npm install
+update: ## Deploy: git pull, rebuild image, restart the systemd service
+	git pull
+	docker build -t $(IMAGE) .
+	sudo systemctl restart $(SERVICE)
+	sudo systemctl status $(SERVICE) --no-pager
 
 # --- Dev: the two long-running processes -------------------------------------
 

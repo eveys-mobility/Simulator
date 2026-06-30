@@ -36,7 +36,7 @@ make web         # run the web UI (dev:web on :5173)
 make dev         # run both together (Ctrl-C stops both)
 make qa          # lint + typecheck + test
 make build       # build every workspace
-make update      # refresh dependencies and the lockfile
+make update      # deploy: git pull, rebuild image, restart service (run on the server)
 ```
 
 Override defaults inline, e.g. `make ocpp OCPP_URL=wss://csms.example.com/ocpp/STATION_01`.
