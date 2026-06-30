@@ -1,3 +1,9 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/cn';
+import { type TraceEntry, useLiveStore } from '@/lib/live-store';
 import {
     ArrowDownToLine,
     ArrowUpFromLine,
@@ -11,12 +17,6 @@ import {
     Waves,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/cn';
-import { type TraceEntry, useLiveStore } from '@/lib/live-store';
 
 interface Props {
     deviceId: string;

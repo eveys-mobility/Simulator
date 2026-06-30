@@ -1,6 +1,6 @@
 import {
-    type ChangeConfigStatus,
     CONFIG_KEY_INDEX,
+    type ChangeConfigStatus,
     type ConfigKeySpec,
     STANDARD_CONFIG_KEYS,
     validateConfigValue,

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { Device } from '@ocpp-sim/core';
+import { describe, expect, it } from 'vitest';
 import { OcppConfig } from './ocpp-config.js';
 import { Store } from './store.js';
 

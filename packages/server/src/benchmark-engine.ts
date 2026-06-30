@@ -1,14 +1,14 @@
 import { EventEmitter } from 'node:events';
-import { v4 as uuid } from 'uuid';
 import {
     type BenchmarkProgress,
     type BenchmarkRunSummary,
-    DEFAULT_AC_WIRING,
     DCBatteryProfileSchema,
+    DEFAULT_AC_WIRING,
     DEVICE_DEFAULTS,
     type Device,
     type Scenario,
 } from '@ocpp-sim/core';
+import { v4 as uuid } from 'uuid';
 import type { DeviceManager } from './device-manager.js';
 import type { Store } from './store.js';
 

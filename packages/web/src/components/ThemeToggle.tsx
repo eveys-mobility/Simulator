@@ -1,4 +1,3 @@
-import { Check, Monitor, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -7,6 +6,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { type ThemeMode, useTheme } from '@/lib/theme';
+import { Check, Monitor, Moon, Sun } from 'lucide-react';
 
 const ICONS: Record<ThemeMode, React.ComponentType<{ className?: string }>> = {
     light: Sun,

@@ -64,7 +64,7 @@ async function gw(method, path, body) {
 }
 
 // Sample frames from the sim's WS to verify CP-initiated CALLs land.
-let wsFrames = [];
+const wsFrames = [];
 function startFrameTap() {
     const ws = new WebSocket(`${SIM.replace('http', 'ws')}/api/ws`);
     ws.on('message', (raw) => {
@@ -113,27 +113,25 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             r.status === 200 ? `cp_id=${cpId}` : 'sim refused device create',
         );
     }
-    {
-        try {
-            await waitFor(
-                () => wsFrames.some((f) => f.deviceId === cpId && f.action === 'BootNotification'),
-                8000,
-                'BootNotification on the wire',
-            );
-            // Confirm the gateway accepted it (sim's BootNotification CALL has
-            // a CALLRESULT from the gateway).
-            const dev = await sim('GET', `/devices/${cpId}`);
-            const online = !!dev.body?.online;
-            record(
-                'BootNotification → gateway Accepted',
-                { deviceId: cpId },
-                { online },
-                online ? 'pass' : 'fail',
-                online ? 'device online after boot' : 'sim never went online',
-            );
-        } catch (e) {
-            record('BootNotification → gateway Accepted', null, null, 'fail', e.message);
-        }
+    try {
+        await waitFor(
+            () => wsFrames.some((f) => f.deviceId === cpId && f.action === 'BootNotification'),
+            8000,
+            'BootNotification on the wire',
+        );
+        // Confirm the gateway accepted it (sim's BootNotification CALL has
+        // a CALLRESULT from the gateway).
+        const dev = await sim('GET', `/devices/${cpId}`);
+        const online = !!dev.body?.online;
+        record(
+            'BootNotification → gateway Accepted',
+            { deviceId: cpId },
+            { online },
+            online ? 'pass' : 'fail',
+            online ? 'device online after boot' : 'sim never went online',
+        );
+    } catch (e) {
+        record('BootNotification → gateway Accepted', null, null, 'fail', e.message);
     }
     {
         // Gateway should now list the cp.
@@ -206,13 +204,11 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
 
     // ============ 3. Authorize-on-RemoteStart + RemoteStart/Stop ============
     section('3. RemoteStart / RemoteStop');
-    {
-        // Tighten the meter cadence directly on the sim so the next
-        // session emits MeterValues quickly. The gateway-side write
-        // earlier also persisted, but reading it back over the wire
-        // can race a session start; setting it sim-side is determ.
-        await sim('PUT', `/devices/${cpId}/config/MeterValueSampleInterval`, { value: '3' });
-    }
+    // Tighten the meter cadence directly on the sim so the next
+    // session emits MeterValues quickly. The gateway-side write
+    // earlier also persisted, but reading it back over the wire
+    // can race a session start; setting it sim-side is determ.
+    await sim('PUT', `/devices/${cpId}/config/MeterValueSampleInterval`, { value: '3' });
     {
         const r = await gw('POST', `/charge-points/${cpId}/commands/remote-start`, {
             id_tag: 'E2E-TAG',
@@ -226,43 +222,41 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             `status=${r.body?.status}`,
         );
     }
-    {
-        try {
-            await waitFor(
-                () =>
-                    wsFrames.some(
-                        (f) =>
-                            f.deviceId === cpId &&
-                            f.action === 'StartTransaction' &&
-                            f.direction === 'out',
-                    ),
-                6000,
-                'StartTransaction CALL',
-            );
-            await waitFor(
-                () =>
-                    wsFrames.some(
-                        (f) =>
-                            f.deviceId === cpId &&
-                            f.action === 'StartTransaction' &&
-                            f.direction === 'in',
-                    ),
-                4000,
-                'StartTransaction CALLRESULT',
-            );
-            const dev = await sim('GET', `/devices/${cpId}`);
-            const c = dev.body?.connectors?.[0];
-            txId = c?.transactionId ?? null;
-            record(
-                'StartTransaction round-trip + sim state',
-                null,
-                { connectorStatus: c?.status, transactionId: txId },
-                c?.status === 'Charging' && txId !== null ? 'pass' : 'fail',
-                `status=${c?.status} txId=${txId}`,
-            );
-        } catch (e) {
-            record('StartTransaction round-trip', null, null, 'fail', e.message);
-        }
+    try {
+        await waitFor(
+            () =>
+                wsFrames.some(
+                    (f) =>
+                        f.deviceId === cpId &&
+                        f.action === 'StartTransaction' &&
+                        f.direction === 'out',
+                ),
+            6000,
+            'StartTransaction CALL',
+        );
+        await waitFor(
+            () =>
+                wsFrames.some(
+                    (f) =>
+                        f.deviceId === cpId &&
+                        f.action === 'StartTransaction' &&
+                        f.direction === 'in',
+                ),
+            4000,
+            'StartTransaction CALLRESULT',
+        );
+        const dev = await sim('GET', `/devices/${cpId}`);
+        const c = dev.body?.connectors?.[0];
+        txId = c?.transactionId ?? null;
+        record(
+            'StartTransaction round-trip + sim state',
+            null,
+            { connectorStatus: c?.status, transactionId: txId },
+            c?.status === 'Charging' && txId !== null ? 'pass' : 'fail',
+            `status=${c?.status} txId=${txId}`,
+        );
+    } catch (e) {
+        record('StartTransaction round-trip', null, null, 'fail', e.message);
     }
     {
         // Wait for at least 1 MeterValues at 3s cadence + a couple
@@ -291,31 +285,29 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             `status=${r.body?.status}`,
         );
     }
-    {
-        try {
-            await waitFor(
-                () =>
-                    wsFrames.some(
-                        (f) =>
-                            f.deviceId === cpId &&
-                            f.action === 'StopTransaction' &&
-                            f.direction === 'out',
-                    ),
-                4000,
-                'StopTransaction CALL',
-            );
-            await waitFor(
-                async () => {
-                    const dev = await sim('GET', `/devices/${cpId}`);
-                    return dev.body?.connectors?.[0]?.status === 'Available';
-                },
-                4000,
-                'connector returns Available',
-            );
-            record('StopTransaction round-trip + Available', null, null, 'pass', '');
-        } catch (e) {
-            record('StopTransaction round-trip + Available', null, null, 'fail', e.message);
-        }
+    try {
+        await waitFor(
+            () =>
+                wsFrames.some(
+                    (f) =>
+                        f.deviceId === cpId &&
+                        f.action === 'StopTransaction' &&
+                        f.direction === 'out',
+                ),
+            4000,
+            'StopTransaction CALL',
+        );
+        await waitFor(
+            async () => {
+                const dev = await sim('GET', `/devices/${cpId}`);
+                return dev.body?.connectors?.[0]?.status === 'Available';
+            },
+            4000,
+            'connector returns Available',
+        );
+        record('StopTransaction round-trip + Available', null, null, 'pass', '');
+    } catch (e) {
+        record('StopTransaction round-trip + Available', null, null, 'fail', e.message);
     }
 
     // ============ 4. ChangeAvailability ============
@@ -333,26 +325,24 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             `status=${r.body?.status}`,
         );
     }
-    {
-        try {
-            await waitFor(
-                async () => {
-                    const dev = await sim('GET', `/devices/${cpId}`);
-                    return dev.body?.connectors?.[0]?.status === 'Unavailable';
-                },
-                4000,
-                'status=Unavailable',
-            );
-            record(
-                'Inoperative reflected on the sim',
-                null,
-                null,
-                'pass',
-                'connector flipped to Unavailable',
-            );
-        } catch (e) {
-            record('Inoperative reflected on the sim', null, null, 'fail', e.message);
-        }
+    try {
+        await waitFor(
+            async () => {
+                const dev = await sim('GET', `/devices/${cpId}`);
+                return dev.body?.connectors?.[0]?.status === 'Unavailable';
+            },
+            4000,
+            'status=Unavailable',
+        );
+        record(
+            'Inoperative reflected on the sim',
+            null,
+            null,
+            'pass',
+            'connector flipped to Unavailable',
+        );
+    } catch (e) {
+        record('Inoperative reflected on the sim', null, null, 'fail', e.message);
     }
     {
         const r = await gw('POST', `/charge-points/${cpId}/commands/change-availability`, {
@@ -389,20 +379,18 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
             `status=${r.body?.status} reservation_id=${reservationId}`,
         );
     }
-    {
-        try {
-            await waitFor(
-                async () => {
-                    const dev = await sim('GET', `/devices/${cpId}`);
-                    return dev.body?.connectors?.[0]?.status === 'Reserved';
-                },
-                4000,
-                'status=Reserved',
-            );
-            record('Reserved status flipped on sim', null, null, 'pass', '');
-        } catch (e) {
-            record('Reserved status flipped on sim', null, null, 'fail', e.message);
-        }
+    try {
+        await waitFor(
+            async () => {
+                const dev = await sim('GET', `/devices/${cpId}`);
+                return dev.body?.connectors?.[0]?.status === 'Reserved';
+            },
+            4000,
+            'status=Reserved',
+        );
+        record('Reserved status flipped on sim', null, null, 'pass', '');
+    } catch (e) {
+        record('Reserved status flipped on sim', null, null, 'fail', e.message);
     }
     {
         const r = await gw('POST', `/charge-points/${cpId}/commands/cancel-reservation`, {

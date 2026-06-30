@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import type {
     AcWiring,
     AuthorizationData,
@@ -16,6 +15,7 @@ import type {
     ScenarioStatus,
     Session,
 } from '@ocpp-sim/core';
+import Database from 'better-sqlite3';
 
 /**
  * SQLite-backed store. Single file, two tables. Schema is versioned

@@ -1,18 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-    AlertOctagon,
-    AlertTriangle,
-    Activity,
-    Cpu,
-    Inbox,
-    PlayCircle,
-    Plus,
-    RefreshCw,
-    Timer,
-    Zap,
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useLiveStore } from '@/lib/live-store';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,7 +13,22 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { api } from '@/lib/api';
+import { useLiveStore } from '@/lib/live-store';
 import type { DeviceType } from '@ocpp-sim/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+    Activity,
+    AlertOctagon,
+    AlertTriangle,
+    Cpu,
+    Inbox,
+    PlayCircle,
+    Plus,
+    RefreshCw,
+    Timer,
+    Zap,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export function FleetPage() {
     const qc = useQueryClient();

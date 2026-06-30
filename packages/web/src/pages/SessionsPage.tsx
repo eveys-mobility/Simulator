@@ -1,6 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +12,9 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import type { Session } from '@ocpp-sim/core';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
 
 type StatusFilter = 'all' | Session['status'];
 

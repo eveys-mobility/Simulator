@@ -1,6 +1,6 @@
 import type { AcWiring, DCBatteryProfile, PhaseMode } from '../domain.js';
 import { computePhaseFrame } from './ac-phase.js';
-import { computeDCFrame, type DCFrame } from './dc-soc.js';
+import { type DCFrame, computeDCFrame } from './dc-soc.js';
 
 /**
  * OCPP 1.6 §8.2 sampledValue. We keep the wire shape verbatim so it

@@ -1,3 +1,21 @@
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LiveDot } from '@/components/LiveDot';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { type DeviceWithRuntime, api } from '@/lib/api';
+import { cn } from '@/lib/cn';
+import { liveKey, useLiveStore } from '@/lib/live-store';
+import type { DeviceType } from '@ocpp-sim/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowRight,
@@ -12,24 +30,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LiveDot } from '@/components/LiveDot';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import { api, type DeviceWithRuntime } from '@/lib/api';
-import { cn } from '@/lib/cn';
-import { liveKey, useLiveStore } from '@/lib/live-store';
-import type { DeviceType } from '@ocpp-sim/core';
 
 type Layout = 'grid' | 'table';
 type StatusFilter = 'all' | 'online' | 'offline';

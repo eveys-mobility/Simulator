@@ -1,10 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Inbox, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BufferMemoryCard } from '@/components/BufferMemoryCard';
 import { ChargingProfiles } from '@/components/ChargingProfiles';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
@@ -12,8 +5,15 @@ import { LiveDot } from '@/components/LiveDot';
 import { ManualControls } from '@/components/ManualControls';
 import { OcppConfigCard } from '@/components/OcppConfigCard';
 import { TraceViewer } from '@/components/TraceViewer';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, ArrowLeft, Inbox, Pencil, Play, Plug, PlugZap, Square } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 
 export function DeviceDetailPage() {
     const { id = '' } = useParams<{ id: string }>();

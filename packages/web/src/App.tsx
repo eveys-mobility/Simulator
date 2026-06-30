@@ -1,14 +1,3 @@
-import {
-    Activity,
-    BarChart3,
-    ClipboardCheck,
-    Cpu,
-    Layers,
-    LogOut,
-    Settings,
-    Zap,
-} from 'lucide-react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { useAuthGate } from '@/lib/auth';
@@ -24,6 +13,17 @@ import { FleetPage } from '@/pages/FleetPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { SessionsPage } from '@/pages/SessionsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import {
+    Activity,
+    BarChart3,
+    ClipboardCheck,
+    Cpu,
+    Layers,
+    LogOut,
+    Settings,
+    Zap,
+} from 'lucide-react';
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 
 export default function App() {
     useApplyTheme();

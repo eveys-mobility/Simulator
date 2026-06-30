@@ -1,5 +1,3 @@
-import { AlertTriangle } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -13,6 +11,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/cn';
+import { AlertTriangle } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 interface ConfirmDialogProps {
     open: boolean;

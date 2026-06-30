@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
-import { Gauge } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
 import type { ChargingProfile } from '@ocpp-sim/core';
+import { useQuery } from '@tanstack/react-query';
+import { Gauge } from 'lucide-react';
 
 interface Props {
     deviceId: string;

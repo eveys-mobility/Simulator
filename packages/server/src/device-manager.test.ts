@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Device } from '@ocpp-sim/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceManager } from './device-manager.js';
 import { Store } from './store.js';
 

@@ -1,3 +1,10 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { api } from '@/lib/api';
+import { cn } from '@/lib/cn';
+import { useLiveStore } from '@/lib/live-store';
+import type { BenchmarkRun } from '@ocpp-sim/core';
 import { useQuery } from '@tanstack/react-query';
 import {
     Activity,
@@ -10,13 +17,6 @@ import {
     XCircle,
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { api } from '@/lib/api';
-import { cn } from '@/lib/cn';
-import { useLiveStore } from '@/lib/live-store';
-import type { BenchmarkRun } from '@ocpp-sim/core';
 
 /**
  * Grafana base URL. Hardcoded to localhost:3000 because the dashboard

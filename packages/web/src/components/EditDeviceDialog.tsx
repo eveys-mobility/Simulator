@@ -1,6 +1,3 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle } from 'lucide-react';
-import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,8 +9,11 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { api, type DeviceWithRuntime } from '@/lib/api';
+import { type DeviceWithRuntime, api } from '@/lib/api';
 import type { PhaseMode } from '@ocpp-sim/core';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 interface Props {
     device: DeviceWithRuntime;

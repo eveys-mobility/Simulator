@@ -1,15 +1,3 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-    AlertOctagon,
-    AlertTriangle,
-    CreditCard,
-    Plug,
-    PlugZap,
-    RefreshCw,
-    Wrench,
-    Zap,
-} from 'lucide-react';
-import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,8 +12,20 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { api, type DeviceWithRuntime } from '@/lib/api';
+import { type DeviceWithRuntime, api } from '@/lib/api';
 import { liveKey, useLiveStore } from '@/lib/live-store';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+    AlertOctagon,
+    AlertTriangle,
+    CreditCard,
+    Plug,
+    PlugZap,
+    RefreshCw,
+    Wrench,
+    Zap,
+} from 'lucide-react';
+import { useState } from 'react';
 
 const FAULT_CODES = [
     'OtherError',

@@ -1,6 +1,4 @@
 import { EventEmitter } from 'node:events';
-import { v4 as uuid } from 'uuid';
-import { WebSocket } from 'ws';
 import {
     BootNotificationResSchema,
     type Device,
@@ -13,6 +11,8 @@ import {
     encodeError,
     encodeResult,
 } from '@ocpp-sim/core';
+import { v4 as uuid } from 'uuid';
+import { WebSocket } from 'ws';
 import {
     ocppBootLatencySeconds,
     ocppCallErrorsTotal,

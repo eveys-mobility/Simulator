@@ -1,14 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, RotateCcw, Save, Trash, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { api, type DeviceWithRuntime } from '@/lib/api';
+import { type DeviceWithRuntime, api } from '@/lib/api';
 import { useLiveStore } from '@/lib/live-store';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, RotateCcw, Save, Trash, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export function SettingsPage() {
     const qc = useQueryClient();
