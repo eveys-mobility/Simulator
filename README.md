@@ -1,4 +1,4 @@
-# OCPP Charge-Point Simulator
+# cOCPP Charge-Point Simulator
 
 Repo: <https://github.com/eveys-mobility/Simulator> · `git clone git@github.com:eveys-mobility/Simulator.git`
 
@@ -23,6 +23,23 @@ npm run dev:web
 - API + WebSocket → <http://localhost:3001>
 
 `OCPP_URL` is the address of your back-office; new devices dial it by default. You can change the address per-device in the UI.
+
+### Makefile shortcuts
+
+The repo ships a `Makefile` that wraps the common npm scripts. Run `make help` to see every target:
+
+```sh
+make help            # list all targets
+make install         # install dependencies
+make ocpp            # run the back-end (dev:server) — honors OCPP_URL
+make eveys-console   # run the web console (dev:web on :5173)
+make dev             # run both together (Ctrl-C stops both)
+make qa              # lint + typecheck + test
+make build           # build every workspace
+make update          # refresh dependencies and the lockfile
+```
+
+Override defaults inline, e.g. `make ocpp OCPP_URL=wss://csms.example.com/ocpp/STATION_01`.
 
 Full guide for running locally and deploying to a server: **[`docs/RUNNING.md`](docs/RUNNING.md)**.
 
