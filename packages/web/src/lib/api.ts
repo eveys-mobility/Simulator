@@ -220,7 +220,7 @@ export const api = {
         const qs = params.toString();
         return http<{ runs: import('@ocpp-sim/core').BenchmarkRun[]; total: number }>(
             'GET',
-            `/benchmark/runs${qs ? '?' + qs : ''}`,
+            `/benchmark/runs${qs ? `?${qs}` : ''}`,
         );
     },
     getBenchmarkRun: (id: number) =>
@@ -261,7 +261,7 @@ export const api = {
         const qs = params.toString();
         return http<{ sessions: Session[]; total: number; limit: number; offset: number }>(
             'GET',
-            `/sessions${qs ? '?' + qs : ''}`,
+            `/sessions${qs ? `?${qs}` : ''}`,
         );
     },
 

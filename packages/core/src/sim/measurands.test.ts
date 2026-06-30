@@ -37,7 +37,7 @@ describe('computeAcMeasurands — 3-phase balanced', () => {
     it('current = power / voltage on each phase', () => {
         const l1 = measurands.find((m) => m.measurand === 'Current.Import' && m.phase === 'L1');
         // 3kW per phase, 230V → ~13.04A
-        expect(Number(l1!.value)).toBeCloseTo(3000 / 230, 1);
+        expect(Number(l1?.value)).toBeCloseTo(3000 / 230, 1);
     });
 });
 

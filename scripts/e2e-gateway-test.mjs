@@ -661,31 +661,36 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
     const failed = sections.flatMap((s) => s.steps).filter((s) => s.status === 'fail').length;
 
     let md = '';
-    md += `# End-to-End Test: Simulator → Eveys OCPP Gateway\n\n`;
+    md += '# End-to-End Test: Simulator → Eveys OCPP Gateway\n\n';
     md += `Run at **${nowIso()}**.\n\n`;
     md += `Wires one simulator device through the real \`eveys-ocpp\` gateway over \`ws://localhost:19000\`, then exercises every CSMS-initiated command from the gateway's REST surface and observes the CP-initiated frames the simulator emits in response.\n\n`;
     md += `- Simulator REST: \`${SIM}/api\`\n`;
     md += `- Gateway REST: \`${GW}\`\n`;
-    md += `- Charger WS: \`ws://localhost:19000/<cp_id>\`\n\n`;
-    md += `## Summary\n\n`;
+    md += '- Charger WS: `ws://localhost:19000/<cp_id>`\n\n';
+    md += '## Summary\n\n';
     md += `| Total | Pass | Fail |\n|---|---|---|\n| ${total} | ${passed} | ${failed} |\n\n`;
-    md += `## Findings while wiring the test\n\n`;
-    md += `The first run hit 33 failures despite the simulator + gateway being healthy — every failure traced to the **REST API shape**, not the OCPP wire. Worth noting for anyone building another integration against the gateway:\n\n`;
-    md += `1. **Auth.** \`/api/v1/commands/*\` requires \`Authorization: Bearer <token>\`. Token is in \`EVEYS_OCPP_REST_INBOUND_TOKENS\` on the gateway container (\`docker inspect eveys-ocpp\`). \`/api/v1/health\` and \`/api/v1/ready\` are open. 401 → unauthorized; without a token every command fails the same way.\n`;
+    md += '## Findings while wiring the test\n\n';
+    md +=
+        'The first run hit 33 failures despite the simulator + gateway being healthy — every failure traced to the **REST API shape**, not the OCPP wire. Worth noting for anyone building another integration against the gateway:\n\n';
+    md +=
+        '1. **Auth.** `/api/v1/commands/*` requires `Authorization: Bearer <token>`. Token is in `EVEYS_OCPP_REST_INBOUND_TOKENS` on the gateway container (`docker inspect eveys-ocpp`). `/api/v1/health` and `/api/v1/ready` are open. 401 → unauthorized; without a token every command fails the same way.\n';
     md += `2. **GetConfiguration uses \`keys\` (plural)**, not the OCPP wire's \`key\`. Passing \`{"key":[...]}\` is silently ignored and the gateway falls back to "all keys".\n`;
-    md += `3. **ReserveNow allocates the \`reservation_id\` server-side** (ADR-0021 / pending-row pattern). Any \`reservation_id\` in the request is ignored; the assigned one comes back in the response. CancelReservation must use the response value.\n`;
+    md +=
+        '3. **ReserveNow allocates the `reservation_id` server-side** (ADR-0021 / pending-row pattern). Any `reservation_id` in the request is ignored; the assigned one comes back in the response. CancelReservation must use the response value.\n';
     md += `4. **SetChargingProfile takes \`charging_profile\` (snake_case, flat)**, not OCPP's \`csChargingProfiles\`. The full envelope including \`transaction_id\` / \`recurrency_kind\` / \`valid_from\` / \`valid_to\` is required (set them to \`null\` when unused).\n`;
-    md += `5. **MeterValues during a session** — first frame fires \`MeterValueSampleInterval\` seconds *after* Charging, not immediately. A 6-second window with 5s cadence and a few hundred ms of OCPP overhead lands the first frame right at the edge; 12s is safer.\n\n`;
-    md += `Once the test understood those, the simulator and gateway round-trip every command correctly.\n\n`;
+    md +=
+        '5. **MeterValues during a session** — first frame fires `MeterValueSampleInterval` seconds *after* Charging, not immediately. A 6-second window with 5s cadence and a few hundred ms of OCPP overhead lands the first frame right at the edge; 12s is safer.\n\n';
+    md +=
+        'Once the test understood those, the simulator and gateway round-trip every command correctly.\n\n';
 
     for (const sec of sections) {
         md += `## ${sec.title}\n\n`;
-        md += `| Step | Result | Notes |\n|---|---|---|\n`;
+        md += '| Step | Result | Notes |\n|---|---|---|\n';
         for (const step of sec.steps) {
             const sym = step.status === 'pass' ? '✅' : step.status === 'fail' ? '❌' : '·';
             md += `| ${step.name} | ${sym} | ${(step.observation ?? '').replace(/\|/g, '\\|')} |\n`;
         }
-        md += `\n`;
+        md += '\n';
         // Verbose per-step details.
         for (const step of sec.steps) {
             if (step.req || step.res) {
@@ -694,7 +699,7 @@ async function waitFor(predicate, timeoutMs = 6000, label = '<predicate>') {
                     md += `**Request**\n\n\`\`\`json\n${JSON.stringify(step.req, null, 2)}\n\`\`\`\n\n`;
                 if (step.res)
                     md += `**Response**\n\n\`\`\`json\n${JSON.stringify(step.res, null, 2)}\n\`\`\`\n\n`;
-                md += `</details>\n\n`;
+                md += '</details>\n\n';
             }
         }
     }

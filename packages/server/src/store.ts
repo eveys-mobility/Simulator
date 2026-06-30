@@ -43,14 +43,14 @@ export class Store {
         // Soft-deleted rows stay in the table so historical sessions
         // keep their FK target — but they don't show up in any list.
         const rows = this.db
-            .prepare(`SELECT * FROM devices WHERE deleted_at IS NULL ORDER BY created_at`)
+            .prepare('SELECT * FROM devices WHERE deleted_at IS NULL ORDER BY created_at')
             .all() as DeviceRow[];
         return rows.map(rowToDevice);
     }
 
     getDevice(id: string): Device | null {
         const row = this.db
-            .prepare(`SELECT * FROM devices WHERE id = ? AND deleted_at IS NULL`)
+            .prepare('SELECT * FROM devices WHERE id = ? AND deleted_at IS NULL')
             .get(id) as DeviceRow | undefined;
         return row ? rowToDevice(row) : null;
     }
@@ -148,7 +148,7 @@ export class Store {
         // soft path keeps history intact and is reversible — see
         // restoreDevice / purgeDevice.
         const r = this.db
-            .prepare(`UPDATE devices SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
+            .prepare('UPDATE devices SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL')
             .run(new Date().toISOString(), id);
         return r.changes > 0;
     }
@@ -161,7 +161,7 @@ export class Store {
      */
     listDeletedDevices(): (Device & { deletedAt: string })[] {
         const rows = this.db
-            .prepare(`SELECT * FROM devices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`)
+            .prepare('SELECT * FROM devices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC')
             .all() as DeviceRow[];
         return rows.map((r) => ({
             ...rowToDevice(r),
@@ -175,7 +175,7 @@ export class Store {
      *  re-spawning the simulator. */
     restoreDevice(id: string): Device | null {
         const r = this.db
-            .prepare(`UPDATE devices SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
+            .prepare('UPDATE devices SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL')
             .run(id);
         if (r.changes === 0) return null;
         return this.getDevice(id);
@@ -187,7 +187,7 @@ export class Store {
      *  No-op if the device isn't in the soft-deleted state. */
     purgeDevice(id: string): boolean {
         const r = this.db
-            .prepare(`DELETE FROM devices WHERE id = ? AND deleted_at IS NOT NULL`)
+            .prepare('DELETE FROM devices WHERE id = ? AND deleted_at IS NOT NULL')
             .run(id);
         return r.changes > 0;
     }
@@ -295,13 +295,13 @@ export class Store {
 
     listConfig(deviceId: string): { key: string; value: string }[] {
         return this.db
-            .prepare(`SELECT key, value FROM device_config WHERE device_id = ? ORDER BY key`)
+            .prepare('SELECT key, value FROM device_config WHERE device_id = ? ORDER BY key')
             .all(deviceId) as { key: string; value: string }[];
     }
 
     getConfig(deviceId: string, key: string): string | null {
         const row = this.db
-            .prepare(`SELECT value FROM device_config WHERE device_id = ? AND key = ?`)
+            .prepare('SELECT value FROM device_config WHERE device_id = ? AND key = ?')
             .get(deviceId, key) as { value: string } | undefined;
         return row?.value ?? null;
     }
@@ -388,8 +388,8 @@ export class Store {
     }[] {
         const sql =
             connectorId !== undefined
-                ? `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ? AND connector_id = ?`
-                : `SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ?`;
+                ? 'SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ? AND connector_id = ?'
+                : 'SELECT connector_id, profile_json FROM charging_profiles WHERE device_id = ?';
         const rows = (
             connectorId !== undefined
                 ? this.db.prepare(sql).all(deviceId, connectorId)
@@ -404,7 +404,7 @@ export class Store {
     // ---- app-wide settings ----
 
     getSetting(key: string): string | null {
-        const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
+        const row = this.db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
             | { value: string }
             | undefined;
         return row?.value ?? null;
@@ -458,16 +458,16 @@ export class Store {
         const limit = Math.max(1, Math.min(200, args.limit ?? 50));
         const offset = Math.max(0, args.offset ?? 0);
         const rows = this.db
-            .prepare(`SELECT * FROM benchmark_runs ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+            .prepare('SELECT * FROM benchmark_runs ORDER BY started_at DESC LIMIT ? OFFSET ?')
             .all(limit, offset) as BenchmarkRunRow[];
         const total = (
-            this.db.prepare(`SELECT COUNT(*) as n FROM benchmark_runs`).get() as { n: number }
+            this.db.prepare('SELECT COUNT(*) as n FROM benchmark_runs').get() as { n: number }
         ).n;
         return { runs: rows.map(rowToBenchmarkRun), total };
     }
 
     getBenchmarkRun(id: number): BenchmarkRun | null {
-        const row = this.db.prepare(`SELECT * FROM benchmark_runs WHERE id = ?`).get(id) as
+        const row = this.db.prepare('SELECT * FROM benchmark_runs WHERE id = ?').get(id) as
             | BenchmarkRunRow
             | undefined;
         return row ? rowToBenchmarkRun(row) : null;
@@ -492,7 +492,7 @@ export class Store {
      *  hasn't sent a list yet. */
     getLocalListVersion(deviceId: string): number {
         const row = this.db
-            .prepare(`SELECT list_version FROM local_auth_meta WHERE device_id = ?`)
+            .prepare('SELECT list_version FROM local_auth_meta WHERE device_id = ?')
             .get(deviceId) as { list_version: number } | undefined;
         return row?.list_version ?? 0;
     }
@@ -543,7 +543,7 @@ export class Store {
      */
     replaceLocalAuthList(deviceId: string, listVersion: number, list: AuthorizationData[]): void {
         const tx = this.db.transaction(() => {
-            this.db.prepare(`DELETE FROM local_auth_entries WHERE device_id = ?`).run(deviceId);
+            this.db.prepare('DELETE FROM local_auth_entries WHERE device_id = ?').run(deviceId);
             const insert = this.db.prepare(
                 `INSERT INTO local_auth_entries (device_id, id_tag, status, expiry_date, parent_id_tag)
                  VALUES (?, ?, ?, ?, ?)`,
@@ -588,7 +588,7 @@ export class Store {
                    parent_id_tag = excluded.parent_id_tag`,
             );
             const remove = this.db.prepare(
-                `DELETE FROM local_auth_entries WHERE device_id = ? AND id_tag = ?`,
+                'DELETE FROM local_auth_entries WHERE device_id = ? AND id_tag = ?',
             );
             for (const entry of list) {
                 if (entry.idTagInfo) {
@@ -693,7 +693,7 @@ export class Store {
     }
 
     deletePendingMessage(id: number): void {
-        this.db.prepare(`DELETE FROM pending_messages WHERE id = ?`).run(id);
+        this.db.prepare('DELETE FROM pending_messages WHERE id = ?').run(id);
     }
 
     /** Increment the per-row attempt counter. Called by the drain
@@ -726,7 +726,7 @@ export class Store {
             )
             .all(deviceId, localTxId) as Array<{ id: number; payload: string }>;
         const update = this.db.prepare(
-            `UPDATE pending_messages SET payload = ?, local_tx_id = NULL WHERE id = ?`,
+            'UPDATE pending_messages SET payload = ?, local_tx_id = NULL WHERE id = ?',
         );
         for (const row of rows) {
             const obj = JSON.parse(row.payload) as Record<string, unknown>;
@@ -737,7 +737,7 @@ export class Store {
 
     countPendingMessages(deviceId: string): number {
         const r = this.db
-            .prepare(`SELECT COUNT(*) AS n FROM pending_messages WHERE device_id = ?`)
+            .prepare('SELECT COUNT(*) AS n FROM pending_messages WHERE device_id = ?')
             .get(deviceId) as { n: number };
         return r.n;
     }
@@ -749,9 +749,9 @@ export class Store {
     clearPendingMessages(deviceId: string, action?: string): number {
         const r = action
             ? this.db
-                  .prepare(`DELETE FROM pending_messages WHERE device_id = ? AND action = ?`)
+                  .prepare('DELETE FROM pending_messages WHERE device_id = ? AND action = ?')
                   .run(deviceId, action)
-            : this.db.prepare(`DELETE FROM pending_messages WHERE device_id = ?`).run(deviceId);
+            : this.db.prepare('DELETE FROM pending_messages WHERE device_id = ?').run(deviceId);
         return r.changes;
     }
 
@@ -1035,7 +1035,7 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
     // simulator is despawned, but the rows stick around for /sessions.
     (db) => {
         addColumnIfMissing(db, 'devices', 'deleted_at', 'TEXT');
-        db.exec(`CREATE INDEX IF NOT EXISTS devices_deleted_at ON devices(deleted_at)`);
+        db.exec('CREATE INDEX IF NOT EXISTS devices_deleted_at ON devices(deleted_at)');
     },
     // v9 — LocalAuthListManagement. One row per (device, idTag) for the
     // entries; one row per device for the list version. Both cascade
